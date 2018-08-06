@@ -3,7 +3,7 @@
  * diag_dns.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -33,9 +33,14 @@ $host = trim($_REQUEST['host'], " \t\n\r\0\x0B[];\"'");
 
 /* If this section of config.xml has not been populated yet we need to set it up
 */
+if (!is_array($config['aliases'])) {
+	$config['aliases'] = array();
+}
+
 if (!is_array($config['aliases']['alias'])) {
 	$config['aliases']['alias'] = array();
 }
+
 $a_aliases = &$config['aliases']['alias'];
 
 $aliasname = substr(str_replace(array(".", "-"), "_", $host), 0, 31);
@@ -333,11 +338,12 @@ if (!$input_errors && $type) {
 </div>
 <?php
 }
+if (!$input_errors):
 ?>
 <script type="text/javascript">
 //<![CDATA[
 events.push(function() {
-	var original_host = "<?=$host;?>";
+	var original_host = <?=json_encode($host);?>;
 
 	$('input[name="host"]').on('input', function() {
 		if ($('#host').val() == original_host) {
@@ -350,4 +356,5 @@ events.push(function() {
 //]]>
 </script>
 <?php
+endif;
 include("foot.inc");

@@ -3,7 +3,7 @@
  * firewall_rules_edit.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -40,15 +40,18 @@ $icmptypes4 = array('any' => gettext('any'));
 $icmptypes6 = array('any' => gettext('any'));
 $icmptypes46 = array('any' => gettext('any'));
 
+// ICMP descriptions may be translated, so require escaping to handle single quotes (in particular)
 foreach ($icmptypes as $k => $v) {
+	$description = addslashes($v['descrip']);
+
 	if ($v['valid4']) {
-		$icmptypes4[$k] = $v['descrip'];
+		$icmptypes4[$k] = $description;
 		if ($v['valid6']) {
-			$icmptypes6[$k] = $v['descrip'];
-			$icmptypes46[$k] = $v['descrip'];
+			$icmptypes6[$k] = $description;
+			$icmptypes46[$k] = $description;
 		}
 	} else {
-		$icmptypes6[$k] = $v['descrip'];
+		$icmptypes6[$k] = $description;
 	}
 }
 
@@ -1066,47 +1069,6 @@ function build_flag_table() {
 	return($flagtable);
 }
 
-function build_if_list() {
-	global $config;
-
-	$iflist = array();
-
-	// add group interfaces
-	if (is_array($config['ifgroups']['ifgroupentry'])) {
-		foreach ($config['ifgroups']['ifgroupentry'] as $ifgen) {
-			if (have_ruleint_access($ifgen['ifname'])) {
-				$iflist[$ifgen['ifname']] = $ifgen['ifname'];
-			}
-		}
-	}
-
-	foreach (get_configured_interface_with_descr() as $ifent => $ifdesc) {
-		if (have_ruleint_access($ifent)) {
-			$iflist[$ifent] = $ifdesc;
-		}
-	}
-
-	if ($config['l2tp']['mode'] == "server" && have_ruleint_access("l2tp")) {
-		$iflist['l2tp'] = gettext('L2TP VPN');
-	}
-
-	if (is_pppoe_server_enabled() && have_ruleint_access("pppoe")) {
-		$iflist['pppoe'] = gettext("PPPoE Server");
-	}
-
-	// add ipsec interfaces
-	if (ipsec_enabled() && have_ruleint_access("enc0")) {
-		$iflist["enc0"] = gettext("IPsec");
-	}
-
-	// add openvpn/tun interfaces
-	if ($config['openvpn']["openvpn-server"] || $config['openvpn']["openvpn-client"]) {
-		$iflist["openvpn"] = gettext("OpenVPN");
-	}
-
-	return($iflist);
-}
-
 $pgtitle = array(gettext("Firewall"), gettext("Rules"));
 $pglinks = array("");
 
@@ -1249,7 +1211,7 @@ if ($if == "FloatingRules" || isset($pconfig['floating'])) {
 		'interface',
 		'*Interface',
 		$pconfig['interface'],
-		build_if_list(),
+		filter_get_interface_list(),
 		true
 	))->setHelp('Choose the interface(s) for this rule.');
 } else {
@@ -1257,7 +1219,7 @@ if ($if == "FloatingRules" || isset($pconfig['floating'])) {
 		'interface',
 		'*Interface',
 		$pconfig['interface'],
-		build_if_list()
+		filter_get_interface_list()
 	))->setHelp('Choose the interface from which packets must come to match this rule.');
 }
 
@@ -1665,37 +1627,35 @@ $section->addInput(new Form_Select(
 	['' => gettext('none')] + array_combine($schedules, $schedules)
 ))->setHelp('Leave as \'none\' to leave the rule enabled all the time.');
 
-$gateways = array("" => gettext('default'));
-foreach (return_gateways_array() as $gwname => $gw) {
-	if (($pconfig['ipprotocol'] == "inet46")) {
-		continue;
-	}
-	if (($pconfig['ipprotocol'] == "inet6") && !(($gw['ipprotocol'] == "inet6") || (is_ipaddrv6($gw['gateway'])))) {
-		continue;
-	}
-	if (($pconfig['ipprotocol'] == "inet") && !(($gw['ipprotocol'] == "inet") || (is_ipaddrv4($gw['gateway'])))) {
-		continue;
-	}
-	if ($gw == "") {
-		continue;
-	}
+// Build the gateway lists in JSON so the selector can be populated in JS
+$gwjson = '[{"name":"", "gateway":"Default", "family":"inet46"}';
 
-	$gateways[ $gwname ] = $gw['name'] . (empty($gw['gateway'])? '' : ' - '. $gw['gateway']) . (empty($gw['descr'])? '' : ' - '. $gw['descr']);
+foreach (return_gateways_array() as $gwname => $gw) {
+	$gwjson = $gwjson . "," .'{"name":"' . $gwname . '", "gateway":"' .
+	$gw['name'] . (empty($gw['gateway'])? '' : ' - '. $gw['gateway']) . (empty($gw['descr'])? '' : ' - '. $gw['descr']) . '","family":"' .
+	$gw['ipprotocol'] . '"}';
 }
 
 foreach ((array)$a_gatewaygroups as $gwg_name => $gwg_data) {
-	if ((empty($pconfig['ipprotocol'])) || ($pconfig['ipprotocol'] == $gwg_data['ipprotocol'])) {
-		$gateways[ $gwg_name ] = $gwg_name . (empty($gwg_data['descr'])? '' : ' - '. $gwg_data['descr']);
-	}
+	$gwjson = $gwjson . "," .'{"name":"' . $gwg_name . '", "gateway":"' .
+	$gwg_data['name'] . $gwg_name . (empty($gwg_data['descr'])? '' : ' - '. $gwg_data['descr']) . '","family":"' .
+	$gwg_data['ipprotocol'] . '"}';
+	$firstgw = false;
 }
 
+$gwjson .= ']';
+$gwselected = $pconfig['gateway'];
+
+// print($gwjson);
+
+// Gateway selector is populated by JavaScript updateGWselect() function
 $section->addInput(new Form_Select(
 	'gateway',
 	'Gateway',
-	$pconfig['gateway'],
-	$gateways
+	'',
+	[]
 ))->setHelp('Leave as \'default\' to use the system routing table. Or choose a '.
-	'gateway to utilize policy based routing.');
+	'gateway to utilize policy based routing. %sGateway selection is not valid for "IPV4+IPV6" address family.', '<br />');
 
 $group = new Form_Group('In / Out pipe');
 
@@ -1757,7 +1717,7 @@ $section->add($group)->setHelp('Choose the Acknowledge Queue only if there is a 
 
 $form->add($section);
 
-gen_created_updated_fields($form, $a_filter[$id]['created'], $a_filter[$id]['updated']);
+gen_created_updated_fields($form, $a_filter[$id]['created'], $a_filter[$id]['updated'], $a_filter[$id]['tracker']);
 
 echo $form;
 ?>
@@ -1773,6 +1733,9 @@ events.push(function() {
 	// Show advanced additional opts options ======================================================
 	var showadvopts = false;
 
+	// Remove focus on page load
+	document.activeElement.blur()
+	
 	function show_advopts(ispageload) {
 		var text;
 		// On page load decide the initial state based on the data.
@@ -1918,6 +1881,33 @@ events.push(function() {
 		}
 	}
 
+	// Populate the "gateway" selector from a JSON array composed in the PHP
+	function updateGWselect() {
+		var selected = "<?=$gwselected?>";
+		var protocol = $('#ipprotocol').val();
+		var json = JSON.parse(<?=json_encode($gwjson)?>);
+
+		// Remove all of the existing optns
+		$('#gateway').find('option').remove();
+
+		// Add new ones as appropriate for the address family
+		json.forEach(function(gwobj) {
+			if (((gwobj.family == protocol) || (gwobj.family == "inet46")) && (protocol != "inet46")) {
+				$('#gateway').append($('<option>', {
+				    text: gwobj.gateway,
+				    value: gwobj.name
+				}));
+			}
+		});
+
+		// Add "selected" attribute as needed
+		$('#gateway').val(selected);
+
+		// Gateway selection is not permitted for "IPV4+IPV6"
+		$('#gateway').prop("disabled", protocol == "inet46");
+
+	}
+
 	function proto_change() {
 		var is_tcpudp = (jQuery.inArray($('#proto :selected').val(), ['tcp','udp', 'tcp/udp']) != -1);
 		portsenabled = (is_tcpudp ? 1 : 0);
@@ -1964,6 +1954,8 @@ events.push(function() {
 		}
 
 		show_source_port_range();
+
+		updateGWselect();
 	}
 
 	function icmptype_change() {

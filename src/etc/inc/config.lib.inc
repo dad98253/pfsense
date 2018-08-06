@@ -3,7 +3,7 @@
  * config.lib.inc
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2009 Erik Kristensen
  * All rights reserved.
  *
@@ -544,6 +544,12 @@ function write_config($desc="Unknown", $backup = true, $write_config_only = fals
 		run_plugins("/usr/local/pkg/write_config/");
 	}
 
+	// Try the core AutoConfigBackup system
+	if (is_array($config['system']['acb']) && $config['system']['acb']['enable'] == "yes") {
+		require_once("acb.inc");
+		upload_config();
+	}
+
 	return $config;
 }
 
@@ -759,11 +765,16 @@ function cleanup_backupcache($lock = false) {
 			if (platform_booting()) {
 				echo ".";
 			}
-			$newxml = parse_xml_config($backup, array($g['xml_rootobj'], 'pfsense'));
+			try {
+				$newxml = parse_xml_config($backup, array($g['xml_rootobj'], 'pfsense'));
+			} catch (Exception $exc) {
+				log_error(sprintf(gettext("The backup cache file %s is corrupted. Parser error message: %s"), $backup, $exc->getMessage()));
+				$newxml = "-1";
+			}
+
 			if ($newxml == "-1") {
 				log_error(sprintf(gettext("The backup cache file %s is corrupted.  Unlinking."), $backup));
 				unlink($backup);
-				log_error(sprintf(gettext("The backup cache file %s is corrupted.  Unlinking."), $backup));
 				continue;
 			}
 			if ($newxml['revision']['description'] == "") {
@@ -966,6 +977,24 @@ function pfSense_clear_globals() {
 	}
 
 	unset($config);
+}
+
+/* Initialize a config array multiple levels deep only if unset
+ * Pass it an array of keys to test and create
+ * init_config_arr(array('virtualip', 'vip'));
+ */
+function init_config_arr($keys) {
+	global $config;
+	$c = &$config;
+	if (!is_array($keys)) {
+		return null;
+	}
+	foreach ($keys as $k) {
+		if (!is_array($c[$k])) {
+			$c[$k] = array();
+		}
+		$c = &$c[$k];
+	}
 }
 
 register_shutdown_function('pfSense_clear_globals');

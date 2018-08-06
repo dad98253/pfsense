@@ -3,7 +3,7 @@
  * picture.widget.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,18 +19,23 @@
  * limitations under the License.
  */
 
-$nocsrf = true;
-
 require_once("guiconfig.inc");
 require_once("pfsense-utils.inc");
 require_once("functions.inc");
 
+
 if ($_GET['getpic']=="true") {
 	$pic_type_s = explode(".", $user_settings['widgets'][$_GET['widgetkey']]['picturewidget_filename']);
 	$pic_type = $pic_type_s[1];
+
 	if ($user_settings['widgets'][$_GET['widgetkey']]['picturewidget']) {
-		$data = base64_decode($user_settings['widgets'][$_GET['widgetkey']]['picturewidget']);
+		if (file_exists("/conf/widget_image." . $_GET['widgetkey'])) {
+			$data = file_get_contents("/conf/widget_image." . $_GET['widgetkey']);
+		} else {
+			$data = "";
+		}
 	}
+
 	header("Content-Disposition: inline; filename=\"{$user_settings['widgets'][$_GET['widgetkey']]['picturewidget_filename']}\"");
 	header("Content-Type: image/{$pic_type}");
 	header("Content-Length: " . strlen($data));
@@ -40,7 +45,6 @@ if ($_GET['getpic']=="true") {
 
 if ($_POST['widgetkey']) {
 	set_customwidgettitle($user_settings);
-
 	if (is_uploaded_file($_FILES['pictfile']['tmp_name'])) {
 		/* read the file contents */
 		$fd_pic = fopen($_FILES['pictfile']['tmp_name'], "rb");
@@ -53,8 +57,17 @@ if ($_POST['widgetkey']) {
 			log_error("Warning, could not read file " . $_FILES['pictfile']['tmp_name']);
 			die("Could not read temporary file");
 		} else {
+			// Make sure they upload an image and not some other file
+			$img_info =getimagesize($_FILES['pictfile']['tmp_name']);
+			if($img_info === FALSE){
+				die("Unable to determine image type of uploaded file");
+			}
+			if(($img_info[2] !== IMAGETYPE_GIF) && ($img_info[2] !== IMAGETYPE_JPEG) && ($img_info[2] !== IMAGETYPE_PNG)){
+				die("Not a gif/jpg/png");
+			}
 			$picname = basename($_FILES['uploadedfile']['name']);
-			$user_settings['widgets'][$_POST['widgetkey']]['picturewidget'] = base64_encode($data);
+			$user_settings['widgets'][$_POST['widgetkey']]['picturewidget'] = "/conf/widget_image";
+			file_put_contents("/conf/widget_image." . $_POST['widgetkey'], $data);
 			$user_settings['widgets'][$_POST['widgetkey']]['picturewidget_filename'] = $_FILES['pictfile']['name'];
 		}
 	}
@@ -65,20 +78,23 @@ if ($_POST['widgetkey']) {
 }
 
 ?>
-<a href="/widgets/widgets/picture.widget.php?getpic=true&widgetkey=<?=$widgetkey?>" target="_blank">
-	<img style="width:100%; height:100%" src="/widgets/widgets/picture.widget.php?getpic=true&widgetkey=<?=$widgetkey?>" alt="picture" />
+<?php
+if($user_settings['widgets'][$widgetkey]["picturewidget"] != null){?>
+<a href="/widgets/widgets/picture.widget.php?getpic=true&widgetkey=<?=htmlspecialchars($widgetkey)?>" target="_blank">
+	<img style="width:100%; height:100%" src="/widgets/widgets/picture.widget.php?getpic=true&widgetkey=<?=htmlspecialchars($widgetkey)?>" alt="picture" />
 </a>
-
+<?php } ?>
 <!-- close the body we're wrapped in and add a configuration-panel -->
-</div><div id="<?=$widget_panel_footer_id?>" class="panel-footer collapse">
+</div><div id="<?=$widget_panel_footer_id?>"
+	<?php echo "class= " . "'" . "panel-footer". ($user_settings['widgets'][$widgetkey]["picturewidget"] != null ? " collapse": ""). "'";  ?>>
 
 <form action="/widgets/widgets/picture.widget.php" method="post" enctype="multipart/form-data" class="form-horizontal">
-	<input type="hidden" name="widgetkey" value="<?=$widgetkey; ?>">
+	<input type="hidden" name="widgetkey" value="<?=htmlspecialchars($widgetkey); ?>">
 	<?=gen_customwidgettitle_div($widgetconfig['title']); ?>
 	<div class="form-group">
-		<label for="pictfile" class="col-sm-4 control-label"><?=gettext('New picture:')?> </label>
+		<label for="pictfile" class="col-sm-4 control-label"><?=gettext('New pictures:')?> </label>
 		<div class="col-sm-6">
-			<input id="pictfile" name="pictfile" type="file" class="form-control" />
+			<input id="pictfile" name="pictfile" type="file" class="form-control" accept="image/*"/>
 		</div>
 	</div>
 	<div class="form-group">

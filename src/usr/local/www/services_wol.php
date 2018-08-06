@@ -3,7 +3,7 @@
  * services_wol.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -31,9 +31,15 @@
 ##|-PRIV
 
 require_once("guiconfig.inc");
+
+if (!is_array($config['wol'])) {
+	$config['wol'] = array();
+}
+
 if (!is_array($config['wol']['wolentry'])) {
 	$config['wol']['wolentry'] = array();
 }
+
 $a_wol = &$config['wol']['wolentry'];
 
 if ($_REQUEST['wakeall'] != "") {

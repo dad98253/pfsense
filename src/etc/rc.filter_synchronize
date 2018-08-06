@@ -6,7 +6,7 @@
  * part of pfSense (https://www.pfsense.org)
  * Copyright (c) 2005 Bill Marquette
  * Copyright (c) 2006 Peter Allgeyer
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally part of m0n0wall (http://m0n0.ch/wall)
@@ -41,11 +41,13 @@ require_once("xmlrpc_client.inc");
 function backup_vip_config_section() {
 	global $config;
 
-	if (!is_array($config['virtualip']['vip'])) {
-		return;
-	}
 	$temp = array();
 	$temp['vip'] = array();
+
+	if (!is_array($config['virtualip']['vip'])) {
+		return $temp;
+	}
+
 	foreach ($config['virtualip']['vip'] as $section) {
 		if (($section['mode'] == 'proxyarp' || $section['mode'] == 'ipalias') &&
 		    (strpos($section['interface'], '_vip') === FALSE) &&
@@ -95,7 +97,7 @@ function carp_check_version() {
 	$rpc_client = new pfsense_xmlrpc_client();
 	$resp = $rpc_client->xmlrpc_method('host_firmware_version');
 
-	log_error(sprintf(gettext("XMLRPC versioncheck:").$resp['config_version'] ." -- ". $config['version']));
+	log_error(sprintf(gettext("XMLRPC versioncheck: ").$resp['config_version'] ." -- ". $config['version']));
 	if (!isset($resp['config_version'])) {
 		update_filter_reload_status("The {$g['product_name']} software configuration version of the other member could not be determined. Skipping synchronization to avoid causing a problem!");
 		log_error("The {$g['product_name']} software configuration version of the other member could not be determined. Skipping synchronization to avoid causing a problem!");
@@ -211,9 +213,9 @@ function carp_sync_xml($sections) {
 				$xml[$section] = $config_copy[$section];
 		}
 	}
-	
+
 	$rpc_client = new pfsense_xmlrpc_client();
-	$resp = $rpc_client->xmlrpc_method('restore_config_section', $xml);
+	$resp = $rpc_client->xmlrpc_method('restore_config_section', $xml, 900);
 	if ($resp != null) {
 		$url = $rpc_client->getUrl();
 		update_filter_reload_status("XMLRPC sync successfully completed with {$url}.");
@@ -348,15 +350,15 @@ if (is_array($config['hasync'])) {
 	if ($hasync['synchronizecaptiveportal'] != "" and is_array($config['captiveportal'])) {
 		$sections[] = 'captiveportal';
 	}
-	if ($hasync['synchronizecaptiveportal'] != "" and is_array($config['vouchers'])) {
-		$sections[] = 'vouchers';
+	if ($hasync['synchronizecaptiveportal'] != "" and is_array($config['voucher'])) {
+		$sections[] = 'voucher';
 	}
 
 	if (count($sections) <= 0) {
 		log_error("Nothing has been configured to be synched. Skipping....");
 		return;
 	}
-	
+
 	if (!carp_check_version()) {
 		return;
 	}
@@ -365,8 +367,4 @@ if (is_array($config['hasync'])) {
 	if (!carp_sync_xml($sections)) {
 		return;
 	}
-
-	$rpc_client = new pfsense_xmlrpc_client();
-	$resp = $rpc_client->xmlrpc_method('filter_configure', "", 900);
-	
 }

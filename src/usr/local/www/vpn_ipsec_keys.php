@@ -3,7 +3,7 @@
  * vpn_ipsec_keys.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -35,6 +35,10 @@ require_once("guiconfig.inc");
 require_once("ipsec.inc");
 require_once("vpn.inc");
 require_once("filter.inc");
+
+if (!is_array($config['ipsec'])) {
+	$config['ipsec'] = array();
+}
 
 if (!is_array($config['ipsec']['mobilekey'])) {
 	$config['ipsec']['mobilekey'] = array();

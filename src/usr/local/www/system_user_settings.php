@@ -3,7 +3,7 @@
  * system_user_settings.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -63,6 +63,10 @@ if (isset($_POST['save'])) {
 	$reqdfields = explode(" ", "webguicss dashboardcolumns");
 	$reqdfieldsn = array(gettext("Theme"), gettext("Dashboard Columns"));
 	do_input_validation($_POST, $reqdfields, $reqdfieldsn, $input_errors);
+	validate_webguicss_field($input_errors, $_POST['webguicss']);
+	validate_webguifixedmenu_field($input_errors, $_POST['webguifixedmenu']);
+	validate_webguihostnamemenu_field($input_errors, $_POST['webguihostnamemenu']);
+	validate_dashboardcolumns_field($input_errors, $_POST['dashboardcolumns']);
 
 	$userent = $a_user[$id];
 

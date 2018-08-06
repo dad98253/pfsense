@@ -3,7 +3,7 @@
  * voucher.inc
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2007-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2007-2018 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2007 Marcel Wiget <mwiget@mac.com>
  * All rights reserved.
  *
@@ -29,17 +29,55 @@ if (!function_exists('captiveportal_syslog')) {
 	require_once("captiveportal.inc");
 }
 
+function xmlrpc_sync_voucher_details(&$syncip, &$port, &$username, &$password) {
+	global $config;
+
+	if (!empty($config['voucher'][$cpzone]['vouchersyncdbip'])) {
+		$syncip = $config['voucher'][$cpzone]['vouchersyncdbip'];
+		$port = $config['voucher'][$cpzone]['vouchersyncport'];
+		$username = $config['voucher'][$cpzone]['vouchersyncusername'];
+		$password = $config['voucher'][$cpzone]['vouchersyncpass'];
+		return true;
+	}
+
+	if (!is_array($config['hasync']) ||
+	    empty($config['hasync']['synchronizetoip']) ||
+	    $config['hasync']['synchronizecaptiveportal'] == "") {
+		return false;
+	}
+
+	$syncip = $config['hasync']['synchronizetoip'];
+	$password = $config['hasync']['password'];
+	if (empty($config['hasync']['username'])) {
+		$username = "admin";
+	} else {
+		$username = $config['hasync']['username'];
+	}
+
+	/* if port is empty lets rely on the protocol selection */
+	$port = $config['system']['webgui']['port'];
+	if (empty($port)) {
+		if ($config['system']['webgui']['protocol'] == "http") {
+			$port = "80";
+		} else {
+			$port = "443";
+		}
+	}
+
+	return true;
+}
+
 function xmlrpc_sync_voucher_expire($vouchers, $syncip, $port, $password, $username) {
 	global $cpzone;
 	require_once("xmlrpc_client.inc");
-	
+
 	/* Construct code that is run on remote machine */
 	$execcmd = <<<EOF
 	global \$cpzone;
 	require_once('/etc/inc/captiveportal.inc');
 	require_once('/etc/inc/voucher.inc');
 	\$cpzone = "$cpzone";
-	voucher_expire("$vouchers");
+	return voucher_expire("$vouchers");
 
 EOF;
 	$rpc_client = new pfsense_xmlrpc_client();
@@ -64,7 +102,7 @@ function xmlrpc_sync_voucher_disconnect($dbent, $syncip, $port, $password, $user
 	\$cpzone = "$cpzone";
 	\$radiusservers = captiveportal_get_radius_servers();
 	\$dbent = unserialize("$dbent_str");
-	captiveportal_disconnect(\$dbent, \$radiusservers, $term_cause, $tmp_stop_time);
+	return captiveportal_disconnect(\$dbent, \$radiusservers, $term_cause, $tmp_stop_time);
 
 EOF;
 	$rpc_client = new pfsense_xmlrpc_client();
@@ -82,20 +120,22 @@ function xmlrpc_sync_used_voucher($voucher_received, $syncip, $port, $password, 
 
 	/* Construct code that is run on remote machine */
 	$execcmd = <<<EOF
-	global \$cpzone;
+	global \$cpzone, \$config;
 	require_once('/etc/inc/voucher.inc');
 	\$cpzone = "$cpzone";
 	\$timeleft = voucher_auth("$voucher_received");
 	\$toreturn = array();
 	\$toreturn['timeleft'] = \$timeleft;
 	\$toreturn['voucher'] = array();
-	\$toreturn['voucher']['roll'] = \$config['voucher'][\$cpzone]['roll'];
+	if (is_array(\$config['voucher'][\$cpzone]['roll'])) {
+		\$toreturn['voucher']['roll'] = \$config['voucher'][\$cpzone]['roll'];
+	}
 
 EOF;
 	$rpc_client = new pfsense_xmlrpc_client();
 	$rpc_client->setConnectionData($syncip, $port, $username, $password);
 	$resp = $rpc_client->xmlrpc_exec_php($execcmd);
-	
+
 	if (!is_array($config['voucher'])) {
 		$config['voucher'] = array();
 	}
@@ -106,7 +146,7 @@ EOF;
 		voucher_configure_zone(true);
 		unset($resp['voucher']);
 	} else if (!isset($resp['timeleft'])) {
-		return null;
+		return 0;
 	}
 
 	return $resp['timeleft'];
@@ -116,12 +156,10 @@ function voucher_expire($voucher_received) {
 	global $g, $config, $cpzone, $cpzoneid;
 
 	// XMLRPC Call over to the master Voucher node
-	if (!empty($config['voucher'][$cpzone]['vouchersyncdbip'])) {
-		$syncip   = $config['voucher'][$cpzone]['vouchersyncdbip'];
-		$syncport = $config['voucher'][$cpzone]['vouchersyncport'];
-		$syncpass = $config['voucher'][$cpzone]['vouchersyncpass'];
-		$vouchersyncusername = $config['voucher'][$cpzone]['vouchersyncusername'];
-		xmlrpc_sync_voucher_expire($voucher_received, $syncip, $syncport, $syncpass, $vouchersyncusername);
+	if (xmlrpc_sync_voucher_details($syncip, $syncport,
+	    $vouchersyncusername, $syncpass)) {
+		xmlrpc_sync_voucher_expire($voucher_received, $syncip,
+		    $syncport, $syncpass, $vouchersyncusername);
 	}
 
 	$voucherlck = lock("voucher{$cpzone}", LOCK_EX);
@@ -247,12 +285,10 @@ function voucher_auth($voucher_received, $test = 0) {
 	}
 
 	// XMLRPC Call over to the master Voucher node
-	if (!empty($config['voucher'][$cpzone]['vouchersyncdbip'])) {
-		$syncip   = $config['voucher'][$cpzone]['vouchersyncdbip'];
-		$syncport = $config['voucher'][$cpzone]['vouchersyncport'];
-		$syncpass = $config['voucher'][$cpzone]['vouchersyncpass'];
-		$vouchersyncusername = $config['voucher'][$cpzone]['vouchersyncusername'];
-		$remote_time_used = xmlrpc_sync_used_voucher($voucher_received, $syncip, $syncport, $syncpass, $vouchersyncusername);
+	if (xmlrpc_sync_voucher_details($syncip, $syncport,
+	    $vouchersyncusername, $syncpass)) {
+		$remote_time_used = xmlrpc_sync_used_voucher($voucher_received,
+		    $syncip, $syncport, $syncpass, $vouchersyncusername);
 	}
 
 	$voucherlck = lock("voucher{$cpzone}", LOCK_EX);

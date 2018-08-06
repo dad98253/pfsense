@@ -3,7 +3,7 @@
  * diag_backup.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -297,6 +297,14 @@ if ($_POST) {
 								$config = parse_config(true);
 								if (file_exists("/boot/loader.conf")) {
 									$loaderconf = file_get_contents("/boot/loader.conf");
+									if (strpos($loaderconf, "console=\"comconsole")) {
+										$config['system']['enableserial'] = true;
+										write_config(gettext("Restore serial console enabling in configuration."));
+									}
+									unset($loaderconf);
+								}
+								if (file_exists("/boot/loader.conf.local")) {
+									$loaderconf = file_get_contents("/boot/loader.conf.local");
 									if (strpos($loaderconf, "console=\"comconsole")) {
 										$config['system']['enableserial'] = true;
 										write_config(gettext("Restore serial console enabling in configuration."));

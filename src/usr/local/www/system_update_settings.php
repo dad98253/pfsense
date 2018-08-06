@@ -3,7 +3,7 @@
  * system_update_settings.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2005 Colin Smith
  * All rights reserved.
  *
@@ -98,32 +98,6 @@ $gitcfg = $config['system']['gitsync'];
 $pgtitle = array(gettext("System"), gettext("Update"), gettext("Update Settings"));
 $pglinks = array("", "pkg_mgr_install.php?id=firmware", "@self");
 
-// Create an array of repo names and descriptions to populate the "Branch" selector
-function build_repo_list() {
-	global $repos;
-
-	$list = array();
-
-	foreach ($repos as $repo) {
-		$list[$repo['name']] = $repo['descr'];
-	}
-
-	return($list);
-}
-
-function get_repo_name($path) {
-	global $repos;
-
-	foreach ($repos as $repo) {
-		if ($repo['path'] == $path) {
-			return $repo['name'];
-		}
-	}
-
-	/* Default */
-	return $repos[0]['name'];
-}
-
 include("head.inc");
 
 if ($input_errors) {
@@ -139,17 +113,31 @@ $tab_array[] = array(gettext("System Update"), false, "pkg_mgr_install.php?id=fi
 $tab_array[] = array(gettext("Update Settings"), true, "system_update_settings.php");
 display_top_tabs($tab_array);
 
+// Check to see if any new repositories have become available. This data is cached and
+// refreshed evrey 24 hours
+update_repos();
+$repopath = "/usr/local/share/{$g['product_name']}/pkg/repos";
+$helpfilename = "{$repopath}/{$g['product_name']}-repo-custom.help";
+
 $form = new Form();
 
 $section = new Form_Section('Firmware Branch');
 
-$section->addInput(new Form_Select(
-	fwbranch,
+$field = new Form_Select(
+	'fwbranch',
 	'*Branch',
-	get_repo_name($config['system']['pkg_repo_conf_path']),
-	build_repo_list()
-))->setHelp('Please select the stable, or the development branch from which to update the system firmware. %1$s' .
-			'Use of the development version is at your own risk!', '<br />');
+	pkg_get_repo_name($config['system']['pkg_repo_conf_path']),
+	pkg_build_repo_list()
+);
+
+if (file_exists($helpfilename)) {
+	$field->setHelp(file_get_contents($helpfilename));
+} else {
+	$field->setHelp('Please select the branch from which to update the system firmware. %1$s' .
+					'Use of the development version is at your own risk!', '<br />');
+}
+
+$section->addInput($field);
 
 $form->add($section);
 
@@ -232,7 +220,7 @@ if (file_exists("/usr/local/bin/git")) {
 		null,
 		'Show Files',
 		isset($gitcfg['show_files'])
-		))->setHelp('Show different and missing files.%1$sWith \'Diff/Minimal\' option..', '<br />');
+		))->setHelp('Show different and missing files.%1$sWith \'Diff/Minimal\' option.', '<br />');
 
 	$group->add(new Form_Checkbox(
 		'show_command',

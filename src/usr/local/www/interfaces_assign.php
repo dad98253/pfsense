@@ -31,6 +31,8 @@
 ##|*MATCH=interfaces_assign.php*
 ##|-PRIV
 
+//$timealla = microtime(true);
+
 $pgtitle = array(gettext("Interfaces"), gettext("Interface Assignments"));
 $shortcut_section = "interfaces";
 
@@ -42,55 +44,12 @@ require_once("ipsec.inc");
 require_once("vpn.inc");
 require_once("captiveportal.inc");
 require_once("rrd.inc");
+require_once("interfaces_fast.inc");
 
-function interface_assign_description($portinfo, $portname) {
-	global $ovpn_descrs;
-	if ($portinfo['isvlan']) {
-		$descr = sprintf(gettext('VLAN %1$s on %2$s'), $portinfo['tag'], $portinfo['if']);
-		$iface = convert_real_interface_to_friendly_interface_name($portinfo['if']);
-		if (isset($iface) && strlen($iface) > 0) {
-			$descr .= " - $iface";
-		}
-		if ($portinfo['descr']) {
-			$descr .= " (" . $portinfo['descr'] . ")";
-		}
-	} elseif ($portinfo['iswlclone']) {
-		$descr = $portinfo['cloneif'];
-		if ($portinfo['descr']) {
-			$descr .= " (" . $portinfo['descr'] . ")";
-		}
-	} elseif ($portinfo['isppp']) {
-		$descr = $portinfo['descr'];
-	} elseif ($portinfo['isbridge']) {
-		$descr = strtoupper($portinfo['bridgeif']);
-		if ($portinfo['descr']) {
-			$descr .= " (" . $portinfo['descr'] . ")";
-		}
-	} elseif ($portinfo['isgre']) {
-		$descr = "GRE {$portinfo['remote-addr']}";
-		if ($portinfo['descr']) {
-			$descr .= " (" . $portinfo['descr'] . ")";
-		}
-	} elseif ($portinfo['isgif']) {
-		$descr = "GIF {$portinfo['remote-addr']}";
-		if ($portinfo['descr']) {
-			$descr .= " (" . $portinfo['descr'] . ")";
-		}
-	} elseif ($portinfo['islagg']) {
-		$descr = strtoupper($portinfo['laggif']);
-		if ($portinfo['descr']) {
-			$descr .= " (" . $portinfo['descr'] . ")";
-		}
-	} elseif ($portinfo['isqinq']) {
-		$descr = $portinfo['descr'];
-	} elseif (substr($portname, 0, 4) == 'ovpn') {
-		$descr = $portname . " (" . $ovpn_descrs[substr($portname, 5)] . ")";
-	} else {
-		$descr = $portname . " (" . $portinfo['mac'] . ")";
-	}
+global $friendlyifnames;
 
-	return htmlspecialchars($descr);
-}
+/*moved most gettext calls to here, we really don't want to be repeatedly calling gettext() within loops if it can be avoided.*/
+$gettextArray = array('add'=>gettext('Add'),'addif'=>gettext('Add interface'),'delete'=>gettext('Delete'),'deleteif'=>gettext('Delete interface'),'edit'=>gettext('Edit'),'on'=>gettext('on'));
 
 /*
 	In this file, "port" refers to the physical port name,
@@ -99,6 +58,11 @@ function interface_assign_description($portinfo, $portname) {
 
 /* get list without VLAN interfaces */
 $portlist = get_interface_list();
+
+/*another *_fast function from interfaces_fast.inc. These functions are basically the same as the
+ones they're named after, except they (usually) take an array and (always) return an array. This means that they only
+need to be called once per script run, the returned array contains all the data necessary for repeated use */
+$friendlyifnames = convert_real_interface_to_friendly_interface_name_fast();
 
 /* add wireless clone interfaces */
 if (is_array($config['wireless']['clone']) && count($config['wireless']['clone'])) {
@@ -110,6 +74,7 @@ if (is_array($config['wireless']['clone']) && count($config['wireless']['clone']
 
 /* add VLAN interfaces */
 if (is_array($config['vlans']['vlan']) && count($config['vlans']['vlan'])) {
+	//$timea = microtime(true);
 	foreach ($config['vlans']['vlan'] as $vlan) {
 		$portlist[$vlan['vlanif']] = $vlan;
 		$portlist[$vlan['vlanif']]['isvlan'] = true;
@@ -163,8 +128,8 @@ if (is_array($config['qinqs']['qinqentry']) && count($config['qinqs']['qinqentry
 		/* QinQ members */
 		$qinqifs = explode(' ', $qinq['members']);
 		foreach ($qinqifs as $qinqif) {
-			$portlist["{$qinq['vlanif']}_{$qinqif}"]['descr'] = "QinQ {$qinqif} on VLAN {$qinq['tag']} on {$qinq['if']}";
-			$portlist["{$qinq['vlanif']}_{$qinqif}"]['isqinq'] = true;
+			$portlist["{$qinq['vlanif']}.{$qinqif}"]['descr'] = "QinQ {$qinqif} on VLAN {$qinq['tag']} on {$qinq['if']}";
+			$portlist["{$qinq['vlanif']}.{$qinqif}"]['isqinq'] = true;
 		}
 	}
 }
@@ -204,6 +169,15 @@ if (is_array($config['openvpn'])) {
 	}
 }
 
+global $ipsec_descrs;
+$ipsec_descrs = interface_ipsec_vti_list_all();
+foreach ($ipsec_descrs as $ifname => $ifdescr) {
+	$portlist[$ifname] = array('descr' => $ifdescr);
+}
+
+
+$ifdescrs = interface_assign_description_fast($portlist,$friendlyifnames);
+
 if (isset($_REQUEST['add']) && isset($_REQUEST['if_add'])) {
 	/* Be sure this port is not being used */
 	$portused = false;
@@ -236,6 +210,7 @@ if (isset($_REQUEST['add']) && isset($_REQUEST['if_add'])) {
 			$config['interfaces'][$newifname]['wireless'] = array();
 			interface_sync_wireless_clones($config['interfaces'][$newifname], false);
 		}
+
 
 		uksort($config['interfaces'], "compare_interface_friendly_names");
 
@@ -366,7 +341,6 @@ if (isset($_REQUEST['add']) && isset($_REQUEST['if_add'])) {
 				}
 			}
 		}
-
 		write_config();
 
 		enable_rrd_graphing();
@@ -442,18 +416,13 @@ if (isset($_REQUEST['add']) && isset($_REQUEST['if_add'])) {
 
 /* Create a list of unused ports */
 $unused_portlist = array();
-foreach ($portlist as $portname => $portinfo) {
-	$portused = false;
-	foreach ($config['interfaces'] as $ifname => $ifdata) {
-		if ($ifdata['if'] == $portname) {
-			$portused = true;
-			break;
-		}
-	}
-	if ($portused === false) {
-		$unused_portlist[$portname] = $portinfo;
-	}
-}
+$portArray = array_keys($portlist);
+
+$ifaceArray = array_column($config['interfaces'],'if');
+$unused = array_diff($portArray,$ifaceArray);
+$unused = array_flip($unused);
+$unused_portlist = array_intersect_key($portlist,$unused);//*/
+unset($unused,$portArray,$ifaceArray);
 
 include("head.inc");
 
@@ -502,6 +471,17 @@ $tab_array[] = array(gettext("GIFs"), false, "interfaces_gif.php");
 $tab_array[] = array(gettext("Bridges"), false, "interfaces_bridge.php");
 $tab_array[] = array(gettext("LAGGs"), false, "interfaces_lagg.php");
 display_top_tabs($tab_array);
+
+/*Generate the port select box only once.
+Not indenting the HTML to produce smaller code
+and faster page load times */
+
+$portselect='';
+foreach ($portlist as $portname => $portinfo) {
+	$portselect.='<option value="'.$portname.'"';
+	$portselect.=">".$ifdescrs[$portname]."</option>\n";
+}
+
 ?>
 <form action="interfaces_assign.php" method="post">
 	<div class="table-responsive">
@@ -515,6 +495,7 @@ display_top_tabs($tab_array);
 	</thead>
 	<tbody>
 <?php
+	$i=0;
 	foreach ($config['interfaces'] as $ifname => $iface):
 		if ($iface['descr']) {
 			$ifdescr = $iface['descr'];
@@ -526,23 +507,23 @@ display_top_tabs($tab_array);
 			<td><a href="/interfaces.php?if=<?=$ifname?>"><?=$ifdescr?></a></td>
 			<td>
 				<select name="<?=$ifname?>" id="<?=$ifname?>" class="form-control">
-<?php foreach ($portlist as $portname => $portinfo):?>
-					<option value="<?=$portname?>" <?=($portname == $iface['if']) ? ' selected': ''?>>
-						<?=interface_assign_description($portinfo, $portname)?>
-					</option>
-<?php endforeach;?>
+<?php
+/*port select menu generation loop replaced with pre-prepared select menu to reduce page generation time */
+echo str_replace('value="'.$iface['if'].'">','value="'.$iface['if'].'" selected>',$portselect);
+?>
 				</select>
 			</td>
 			<td>
 <?php if ($ifname != 'wan'):?>
-				<button type="submit" name="del[<?=$ifname?>]" class="btn btn-danger btn-sm" title="<?=gettext("Delete interface")?>">
+				<button type="submit" name="del[<?=$ifname?>]" class="btn btn-danger btn-sm" title="<?=$gettextArray['deleteif']?>">
 					<i class="fa fa-trash icon-embed-btn"></i>
-					<?=gettext("Delete")?>
+					<?=$gettextArray["delete"]?>
 				</button>
 <?php endif;?>
 			</td>
 		</tr>
-<?php endforeach;
+<?php $i++;
+endforeach;
 	if (count($config['interfaces']) < count($portlist)):
 ?>
 		<tr>
@@ -551,17 +532,18 @@ display_top_tabs($tab_array);
 			</th>
 			<td>
 				<select name="if_add" id="if_add" class="form-control">
-<?php foreach ($unused_portlist as $portname => $portinfo):?>
-					<option value="<?=$portname?>" <?=($portname == $iface['if']) ? ' selected': ''?>>
-						<?=interface_assign_description($portinfo, $portname)?>
-					</option>
-<?php endforeach;?>
+<?php
+/* HTML not indented to save on transmission/render time */
+foreach ($unused_portlist as $portname => $portinfo):?>
+<option value="<?=$portname?>" <?=($portname == $iface['if']) ? ' selected': ''?>><?=$ifdescrs[$portname]?></option>
+<?php endforeach;
+?>
 				</select>
 			</td>
 			<td>
 				<button type="submit" name="add" title="<?=gettext("Add selected interface")?>" value="add interface" class="btn btn-success btn-sm" >
 					<i class="fa fa-plus icon-embed-btn"></i>
-					<?=gettext("Add")?>
+					<?=$gettextArray["add"]?>
 				</button>
 			</td>
 		</tr>

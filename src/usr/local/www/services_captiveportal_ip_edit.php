@@ -3,7 +3,7 @@
  * services_captiveportal_ip_edit.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2004 Dinesh Nair <dinesh@alphaque.com>
  * All rights reserved.
  *
@@ -215,7 +215,7 @@ $section->addInput(new Form_IpAddress(
 	'ip',
 	'*IP Address',
 	$pconfig['ip']
-))->addMask(sn, $pconfig['sn'], 32);
+))->addMask('sn', $pconfig['sn'], 32);
 
 $section->addInput(new Form_Input(
 	'descr',

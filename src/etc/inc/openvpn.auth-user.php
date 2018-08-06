@@ -4,7 +4,7 @@
  *
  * part of pfSense (https://www.pfsense.org)
  * Copyright (c) 2008 Shrew Soft Inc
- * Copyright (c) 2008-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2008-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -28,7 +28,6 @@
 
 require_once("globals.inc");
 require_once("config.inc");
-require_once("radius.inc");
 require_once("auth.inc");
 require_once("interfaces.inc");
 
@@ -95,6 +94,8 @@ function getCalledStationId() {
 /* setup syslog logging */
 openlog("openvpn", LOG_ODELAY, LOG_AUTH);
 
+global $common_name, $username;
+
 if (isset($_GET['username'])) {
 	$authmodes = explode(",", base64_decode($_GET['authcfg']));
 	/* Any string retrieved through $_GET is automatically urlDecoded */
@@ -133,7 +134,7 @@ if (file_exists("{$g['varetc_path']}/openvpn/{$modeid}.ca")) {
 $authenticated = false;
 
 if (($strictusercn === true) && (mb_strtolower($common_name) !== mb_strtolower($username))) {
-	syslog(LOG_WARNING, "Username does not match certificate common name ({$username} != {$common_name}), access denied.\n");
+	syslog(LOG_WARNING, "Username does not match certificate common name (\"{$username}\" != \"{$common_name}\"), access denied.\n");
 	if (isset($_GET['username'])) {
 		echo "FAILED";
 		closelog();

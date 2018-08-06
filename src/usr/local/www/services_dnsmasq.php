@@ -3,7 +3,7 @@
  * services_dnsmasq.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2003-2004 Bob Zoller <bob@kludgebox.com>
  * All rights reserved.
  *
@@ -50,7 +50,7 @@ function hosts_sort() {
 		return;
 	}
 
-	usort($a_hosts, "hostcmp");
+	uasort($a_hosts, "hostcmp");
 }
 
 // Sort domain entries for display in alphabetical order
@@ -65,7 +65,7 @@ function domains_sort() {
 		return;
 	}
 
-	usort($a_domainOverrides, "domaincmp");
+	uasort($a_domainOverrides, "domaincmp");
 }
 
 $pconfig['enable'] = isset($config['dnsmasq']['enable']);
@@ -274,8 +274,8 @@ $section->addInput(new Form_Checkbox(
 	'Static DHCP',
 	'Register DHCP static mappings in DNS forwarder',
 	$pconfig['regdhcpstatic']
-))->setHelp('If this option is set, DHCP static mappings will '.
-					'be registered in the DNS forwarder, so that their name can be '.
+))->setHelp('If this option is set, IPv4 DHCP static mappings will '.
+					'be registered in the DNS forwarder so that their name can be '.
 					'resolved. The domain in %1$sSystem: General Setup%2$s should also '.
 					'be set to the proper value.', '<a href="system.php">', '</a>')
 	->addClass('toggle-dhcp');

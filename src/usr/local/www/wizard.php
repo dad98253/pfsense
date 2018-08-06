@@ -3,7 +3,7 @@
  * wizard.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -72,9 +72,7 @@ if (!is_array($pkg)) {
 	die;
 }
 
-$title	   = preg_replace("/pfSense/i", $g['product_name'], $pkg['step'][$stepid]['title']);
-$description = preg_replace("/pfSense/i", $g['product_name'], $pkg['step'][$stepid]['description']);
-$totalsteps	 = $pkg['totalsteps'];
+$totalsteps = $pkg['totalsteps'];
 
 if ($pkg['includefile']) {
 	require_once($pkg['includefile']);
@@ -120,10 +118,29 @@ if ($_POST && !$input_errors) {
 	}
 
 	$stepid++;
-	if ($stepid > $totalsteps) {
-		$stepid = $totalsteps;
+}
+
+while (!empty($pkg['step'][$stepid]['skip_flavors'])) {
+	$skip = false;
+	foreach (explode(',', $pkg['step'][$stepid]['skip_flavors']) as $flavor) {
+		if ($flavor == $g['default-config-flavor']) {
+			$skip = true;
+			break;
+		}
+	}
+	if ($skip) {
+		$stepid++;
+	} else {
+		break;
 	}
 }
+
+if ($stepid > $totalsteps) {
+	$stepid = $totalsteps;
+}
+
+$title = preg_replace("/pfSense/i", $g['product_name'], $pkg['step'][$stepid]['title']);
+$description = preg_replace("/pfSense/i", $g['product_name'], $pkg['step'][$stepid]['description']);
 
 function update_config_field($field, $updatetext, $unset, $arraynum, $field_type) {
 	global $config;
@@ -630,6 +647,10 @@ if ($pkg['step'][$stepid]['fields']['field'] != "") {
 					$options[$field['add_to_certca_selection']] = $field['add_to_certca_selection'];
 				}
 
+				if (!is_array($config['ca'])) {
+					$config['ca'] = array();
+				}
+
 				foreach ($config['ca'] as $ca) {
 					$caname = htmlspecialchars($ca['descr']);
 
@@ -673,6 +694,10 @@ if ($pkg['step'][$stepid]['fields']['field'] != "") {
 					}
 
 					$options[$field['add_to_cert_selection']] = $field['add_to_cert_selection'];
+				}
+
+				if (!is_array($config['cert'])) {
+					$config['cert'] = array();
 				}
 
 				foreach ($config['cert'] as $ca) {

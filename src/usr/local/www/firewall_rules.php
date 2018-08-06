@@ -3,7 +3,7 @@
  * firewall_rules.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -83,9 +83,10 @@ function print_states($tracker) {
 		}
 	}
 
+	$trackertext = !empty($tracker) ? "Tracking ID: {$tracker}<br>" : "";
 	printf("<a href=\"diag_dump_states.php?ruleid=%s\" data-toggle=\"popover\" data-trigger=\"hover focus\" title=\"%s\" ",
 	    $rulesid, gettext("States details"));
-	printf("data-content=\"evaluations: %s<br>packets: %s<br>bytes: %s<br>states: %s<br>state creations: %s\" data-html=\"true\" usepost>",
+	printf("data-content=\"{$trackertext}evaluations: %s<br>packets: %s<br>bytes: %s<br>states: %s<br>state creations: %s\" data-html=\"true\" usepost>",
 	    format_number($evaluations), format_number($packets), format_bytes($bytes),
 	    format_number($states), format_number($stcreations));
 	printf("%s/%s</a><br>", format_number($states), format_bytes($bytes));
@@ -107,6 +108,10 @@ function delete_nat_association($id) {
 	}
 }
 
+if (!is_array($config['filter'])) {
+	$config['filter'] = array();
+}
+
 if (!is_array($config['filter']['rule'])) {
 	$config['filter']['rule'] = array();
 }
@@ -120,44 +125,7 @@ if ($_REQUEST['if']) {
 
 $ifdescs = get_configured_interface_with_descr();
 
-/* add group interfaces */
-if (is_array($config['ifgroups']['ifgroupentry'])) {
-	foreach ($config['ifgroups']['ifgroupentry'] as $ifgen) {
-		if (have_ruleint_access($ifgen['ifname'])) {
-			$iflist[$ifgen['ifname']] = $ifgen['ifname'];
-		}
-	}
-}
-
-foreach ($ifdescs as $ifent => $ifdesc) {
-	if (have_ruleint_access($ifent)) {
-		$iflist[$ifent] = $ifdesc;
-	}
-}
-
-if ($config['l2tp']['mode'] == "server") {
-	if (have_ruleint_access("l2tp")) {
-		$iflist['l2tp'] = gettext("L2TP VPN");
-	}
-}
-
-if (is_array($config['pppoes']['pppoe'])) {
-	foreach ($config['pppoes']['pppoe'] as $pppoes) {
-		if (($pppoes['mode'] == 'server') && have_ruleint_access("pppoe")) {
-			$iflist['pppoe'] = gettext("PPPoE Server");
-		}
-	}
-}
-
-/* add ipsec interfaces */
-if (ipsec_enabled() && have_ruleint_access("enc0")) {
-	$iflist["enc0"] = gettext("IPsec");
-}
-
-/* add openvpn/tun interfaces */
-if ($config['openvpn']["openvpn-server"] || $config['openvpn']["openvpn-client"]) {
-	$iflist["openvpn"] = gettext("OpenVPN");
-}
+$iflist = filter_get_interface_list();
 
 if (!$if || !isset($iflist[$if])) {
 	if ($if != "any" && $if != "FloatingRules" && isset($iflist['wan'])) {
@@ -286,7 +254,15 @@ if (isset($_POST['del_x'])) {
 
 		if ($_POST['separator']) {
 			$idx = 0;
+			if (!is_array($config['filter']['separator'])) {
+				$config['filter']['separator'] = array();
+			}
+
 			foreach ($_POST['separator'] as $separator) {
+				if (!is_array($config['filter']['separator'][strtolower($separator['if'])]))  {
+					$config['filter']['separator'][strtolower($separator['if'])] = array();
+				}
+
 				$config['filter']['separator'][strtolower($separator['if'])]['sep' . $idx++] = $separator;
 			}
 		}
@@ -523,6 +499,13 @@ foreach ($a_filter as $filteri => $filterent):
 			pprint_port($filterent['destination']['port'])
 		);
 
+		if (!is_array($config['schedules'])) {
+			$config['schedules'] = array();
+		}
+
+		if (!is_array($config['schedules']['schedule'])) {
+			$config['schedules']['schedule'] = array();
+		}
 		//build Schedule popup box
 		$a_schedules = &$config['schedules']['schedule'];
 		$schedule_span_begin = "";
@@ -954,6 +937,7 @@ events.push(function() {
 		$(this).removeClass().addClass("fa fa-anchor");
 	});
 
+<?php if(!isset($config['system']['webgui']['roworderdragging'])): ?>
 	// Make rules sortable. Hiding the table before applying sortable, then showing it again is
 	// a work-around for very slow sorting on FireFox
 	$('table tbody.user-entries').hide();
@@ -971,6 +955,7 @@ events.push(function() {
 	});
 
 	$('table tbody.user-entries').show();
+<?php endif; ?>
 
 	// Check all of the rule checkboxes so that their values are posted
 	$('#order-store').click(function () {

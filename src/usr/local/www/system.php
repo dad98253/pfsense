@@ -3,7 +3,7 @@
  * system.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -78,6 +78,7 @@ $pconfig['statusmonitoringsettingspanel'] = isset($config['system']['webgui']['s
 $pconfig['webguihostnamemenu'] = $config['system']['webgui']['webguihostnamemenu'];
 $pconfig['dnslocalhost'] = isset($config['system']['dnslocalhost']);
 //$pconfig['dashboardperiod'] = isset($config['widgets']['period']) ? $config['widgets']['period']:"10";
+$pconfig['roworderdragging'] = isset($config['system']['webgui']['roworderdragging']);
 $pconfig['loginshowhost'] = isset($config['system']['webgui']['loginshowhost']);
 $pconfig['requirestatefilter'] = isset($config['system']['webgui']['requirestatefilter']);
 
@@ -135,7 +136,7 @@ foreach ($timezonedesc as $idx => $desc) {
 
 	$hr_offset = substr($desc, 8);
 	$timezonedesc[$idx] = $desc . " " .
-	    sprintf(ngettext('(%1$s hour %2$s GMT)', '(%1$s hours %2$s GMT)', $hr_offset), $hr_offset, $direction_str);
+	    sprintf(ngettext('(%1$s hour %2$s GMT)', '(%1$s hours %2$s GMT)', intval($hr_offset)), $hr_offset, $direction_str);
 }
 
 $multiwan = false;
@@ -159,44 +160,6 @@ if ($_POST) {
 
 	do_input_validation($_POST, $reqdfields, $reqdfieldsn, $input_errors);
 
-//	if ($_POST['dashboardperiod']) {
-//		$config['widgets']['period'] = $_POST['dashboardperiod'];
-//	}
-
-	if ($_POST['webguicss']) {
-		$config['system']['webgui']['webguicss'] = $_POST['webguicss'];
-	} else {
-		unset($config['system']['webgui']['webguicss']);
-	}
-
-	if ($_POST['logincss']) {
-		$config['system']['webgui']['logincss'] = $_POST['logincss'];
-	} else {
-		unset($config['system']['webgui']['logincss']);
-	}
-
-	$config['system']['webgui']['loginshowhost'] = $_POST['loginshowhost'] ? true:false;
-
-	if ($_POST['webguifixedmenu']) {
-		$config['system']['webgui']['webguifixedmenu'] = $_POST['webguifixedmenu'];
-	} else {
-		unset($config['system']['webgui']['webguifixedmenu']);
-	}
-
-	if ($_POST['webguihostnamemenu']) {
-		$config['system']['webgui']['webguihostnamemenu'] = $_POST['webguihostnamemenu'];
-	} else {
-		unset($config['system']['webgui']['webguihostnamemenu']);
-	}
-
-	if ($_POST['dashboardcolumns']) {
-		$config['system']['webgui']['dashboardcolumns'] = $_POST['dashboardcolumns'];
-	} else {
-		unset($config['system']['webgui']['dashboardcolumns']);
-	}
-
-	$config['system']['webgui']['requirestatefilter'] = $_POST['requirestatefilter'] ? true : false;
-
 	if ($_POST['hostname']) {
 		if (!is_hostname($_POST['hostname'])) {
 			$input_errors[] = gettext("The hostname can only contain the characters A-Z, 0-9 and '-'. It may not start or end with '-'.");
@@ -209,6 +172,10 @@ if ($_POST) {
 	if ($_POST['domain'] && !is_domain($_POST['domain'])) {
 		$input_errors[] = gettext("The domain may only contain the characters a-z, 0-9, '-' and '.'.");
 	}
+	validate_webguicss_field($input_errors, $_POST['webguicss']);
+	validate_webguifixedmenu_field($input_errors, $_POST['webguifixedmenu']);
+	validate_webguihostnamemenu_field($input_errors, $_POST['webguihostnamemenu']);
+	validate_dashboardcolumns_field($input_errors, $_POST['dashboardcolumns']);
 
 	$dnslist = $ignore_posted_dnsgw = array();
 
@@ -305,6 +272,46 @@ if ($_POST) {
 
 		unset($config['system']['webgui']['statusmonitoringsettingspanel']);
 		$config['system']['webgui']['statusmonitoringsettingspanel'] = $_POST['statusmonitoringsettingspanel'] ? true : false;
+
+//		if ($_POST['dashboardperiod']) {
+//			$config['widgets']['period'] = $_POST['dashboardperiod'];
+//		}
+
+		if ($_POST['webguicss']) {
+			$config['system']['webgui']['webguicss'] = $_POST['webguicss'];
+		} else {
+			unset($config['system']['webgui']['webguicss']);
+		}
+
+		$config['system']['webgui']['roworderdragging'] = $_POST['roworderdragging'] ? true:false;
+
+		if ($_POST['logincss']) {
+			$config['system']['webgui']['logincss'] = $_POST['logincss'];
+		} else {
+			unset($config['system']['webgui']['logincss']);
+		}
+
+		$config['system']['webgui']['loginshowhost'] = $_POST['loginshowhost'] ? true:false;
+
+		if ($_POST['webguifixedmenu']) {
+			$config['system']['webgui']['webguifixedmenu'] = $_POST['webguifixedmenu'];
+		} else {
+			unset($config['system']['webgui']['webguifixedmenu']);
+		}
+
+		if ($_POST['webguihostnamemenu']) {
+			$config['system']['webgui']['webguihostnamemenu'] = $_POST['webguihostnamemenu'];
+		} else {
+			unset($config['system']['webgui']['webguihostnamemenu']);
+		}
+
+		if ($_POST['dashboardcolumns']) {
+			$config['system']['webgui']['dashboardcolumns'] = $_POST['dashboardcolumns'];
+		} else {
+			unset($config['system']['webgui']['dashboardcolumns']);
+		}
+
+		$config['system']['webgui']['requirestatefilter'] = $_POST['requirestatefilter'] ? true : false;
 
 		/* XXX - billm: these still need updating after figuring out how to check if they actually changed */
 		$olddnsservers = $config['system']['dnsserver'];
@@ -605,6 +612,13 @@ gen_associatedpanels_fields(
 gen_requirestatefilter_field($section, $pconfig['requirestatefilter']);
 gen_webguileftcolumnhyper_field($section, $pconfig['webguileftcolumnhyper']);
 gen_disablealiaspopupdetail_field($section, $pconfig['disablealiaspopupdetail']);
+
+$section->addInput(new Form_Checkbox(
+	'roworderdragging',
+	'Disable dragging',
+	'Disable dragging of firewall/nat rules.',
+	$pconfig['roworderdragging']
+))->setHelp('Disables dragging rows to allow selecting and copying row contents and avoid accidental changes.');
 
 $section->addInput(new Form_Select(
 	'logincss',

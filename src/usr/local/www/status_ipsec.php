@@ -3,7 +3,7 @@
  * status_ipsec.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -35,6 +35,10 @@ require_once("ipsec.inc");
 
 global $g;
 
+if(!is_array($config['ipsec'])){
+	$config['ipsec'] = array();
+}
+
 if (!is_array($config['ipsec']['phase1'])) {
 	$config['ipsec']['phase1'] = array();
 }
@@ -57,39 +61,39 @@ if ($_POST['act'] == 'connect') {
 					mwexec_bg("/usr/local/sbin/ipsec up {$connid}");
 				}
 			} else {
-				mwexec_bg("/usr/local/sbin/ipsec down con" . escapeshellarg($_POST['ikeid']));
-				mwexec_bg("/usr/local/sbin/ipsec up con" . escapeshellarg($_POST['ikeid']));
+				mwexec_bg("/usr/local/sbin/ipsec down con" . escapeshellarg($_POST['ikeid'] . '000'));
+				mwexec_bg("/usr/local/sbin/ipsec up con" . escapeshellarg($_POST['ikeid'] . '000'));
 			}
 		}
 	}
 } else if ($_POST['act'] == 'ikedisconnect') {
-	if (ctype_digit($_POST['ikeid'])) {
-		if (!empty($_POST['ikesaid']) && ctype_digit($_POST['ikesaid'])) {
-			mwexec_bg("/usr/local/sbin/ipsec down con" . escapeshellarg($_POST['ikeid']) . "[" . escapeshellarg($_POST['ikesaid']) . "]");
-		} else {
-			mwexec_bg("/usr/local/sbin/ipsec down con" . escapeshellarg($_POST['ikeid']));
-		}
+
+	if (!empty($_POST['ikesaid']) && ctype_digit($_POST['ikesaid'])) {
+		mwexec_bg("/usr/local/sbin/ipsec down " ."'" . escapeshellarg($_POST['ikeid']) . "[" . escapeshellarg($_POST['ikesaid']) . "]" . "'");
+	} else {
+		mwexec_bg("/usr/local/sbin/ipsec down " . escapeshellarg($_POST['ikeid']));
 	}
 } else if ($_POST['act'] == 'childdisconnect') {
-	if (ctype_digit($_POST['ikeid'])) {
+	//pull out number from id
 		if (!empty($_POST['ikesaid']) && ctype_digit($_POST['ikesaid'])) {
-			mwexec_bg("/usr/local/sbin/ipsec down con" . escapeshellarg($_POST['ikeid']) . "{" . escapeshellarg($_POST['ikesaid']) . "}");
+			mwexec_bg("/usr/local/sbin/ipsec down " . escapeshellarg($_POST['ikeid']) . "{" . escapeshellarg($_POST['ikesaid']) . "}");
 		}
-	}
 }
 
 // Table body is composed here so that it can be more easily updated via AJAX
 function print_ipsec_body() {
 	global $config;
-
 	$a_phase1 = &$config['ipsec']['phase1'];
 	$status = ipsec_list_sa();
 	$ipsecconnected = array();
-
 	if (is_array($status)) {
 		foreach ($status as $ikeid => $ikesa) {
-			$con_id = substr($ikeid, 3);
-
+			//check which array format
+			if(isset($ikesa['con-id'])){
+				$con_id = substr($ikesa['con-id'],3);
+			}else{
+				$con_id = filter_var($ikeid, FILTER_SANITIZE_NUMBER_INT);
+			}
 			if ($ikesa['version'] == 1) {
 				$ph1idx = substr($con_id, 0, strrpos(substr($con_id, 0, -1), '00'));
 				$ipsecconnected[$ph1idx] = $ph1idx;
@@ -104,9 +108,24 @@ function print_ipsec_body() {
 			}
 
 			print("<tr>\n");
+
 			print("<td>\n");
+			print(htmlspecialchars($ikesa['con-id'])) . ":\n";
+			print('#' . htmlspecialchars($ikesa['uniqueid']));
+			print("</td>\n");
+
+			print("<td>\n");
+			if (is_array($a_phase1) && htmlspecialchars(ipsec_get_descr($ph1idx)) == "") {
+				foreach ($a_phase1 as $ph1) {
+					if($con_id == $ph1['ikeid'] && isset($ph1['mobile']) ){
+						print(htmlspecialchars($ph1['descr']));
+						break;
+					}
+				}
+			}
 			print(htmlspecialchars(ipsec_get_descr($ph1idx)));
 			print("</td>\n");
+
 			print("<td>\n");
 
 			if (!empty($ikesa['local-id'])) {
@@ -221,20 +240,18 @@ function print_ipsec_body() {
 				printf(gettext('%1$s seconds (%2$s) ago'), htmlspecialchars($ikesa['established']), convert_seconds_to_dhms($ikesa['established']));
 			}
 
-			print("</span>");
-			print("</td>\n");
-			print("<td>\n");
+			print("</span><br /><br />");
 
 			if ($ikesa['state'] != 'ESTABLISHED') {
 
-				print('<a href="status_ipsec.php?act=connect&amp;ikeid=' . $con_id . '" class="btn btn-xs btn-success" data-toggle="tooltip" title="' . gettext("Connect VPN"). '" usepost>');
+				print('<a href="status_ipsec.php?act=connect&amp;ikeid=' . $con_id . '&amp;ikesaid=' .$ikesa['uniqueid'] . '" class="btn btn-xs btn-success" data-toggle="tooltip" title="' . gettext("Connect VPN"). '" usepost>');
 				print('<i class="fa fa-sign-in icon-embed-btn"></i>');
 				print(gettext("Connect VPN"));
 				print("</a>\n");
 
 			} else {
 
-				print('<a href="status_ipsec.php?act=ikedisconnect&amp;ikeid=' . $con_id . '" class="btn btn-xs btn-danger" data-toggle="tooltip" title="' . gettext("Disconnect VPN") . '" usepost>');
+				print('<a href="status_ipsec.php?act=ikedisconnect&amp;ikeid=' . $ikesa['con-id']. '&amp;ikesaid=' .$ikesa['uniqueid'] . '"class="btn btn-xs btn-danger" data-toggle="tooltip" title="' . gettext("Disconnect VPN") . '" usepost>');
 				print('<i class="fa fa-trash icon-embed-btn"></i>');
 				print(gettext("Disconnect"));
 				print("</a><br />\n");
@@ -247,23 +264,29 @@ function print_ipsec_body() {
 			print("<td colspan = 10>\n");
 
 			if (is_array($ikesa['child-sas']) && (count($ikesa['child-sas']) > 0)) {
+				$child_key = "";
+				foreach ($ikesa['child-sas'] as $key => $val){
+					$child_key = $key;
+					break;
+				}
 
 				print('<div>');
-				print('<a type="button" id="btnchildsa-' . $ikeid .  '" class="btn btn-sm btn-info">');
+				print('<a type="button" id="btnchildsa-'. $child_key .  '" class="btn btn-sm btn-info">');
 				print('<i class="fa fa-plus-circle icon-embed-btn"></i>');
 				print(gettext('Show child SA entries'));
 				print("</a>\n");
 				print("	</div>\n");
 
-				print('<table class="table table-hover table-condensed" id="childsa-' . $ikeid . '" style="display:none">');
+				print('<table class="table table-hover table-condensed" id="childsa-'.$child_key . '" style="display:none">');
 				print("<thead>\n");
 				print('<tr class="bg-info">');
-				print('<th><?=gettext("Local subnets")?></th>');
-				print('<th><?=gettext("Local SPI(s)")?></th>');
-				print('<th><?=gettext("Remote subnets")?></th>');
-				print('<th><?=gettext("Times")?></th>');
-				print('<th><?=gettext("Algo")?></th>');
-				print('<th><?=gettext("Stats")?></th>');
+				print('<th>' . gettext("IPsec ID") . '</th>');
+				print('<th>' . gettext("Local subnets") . '</th>');
+				print('<th>' . gettext("Local SPI(s)") . '</th>');
+				print('<th>' . gettext("Remote subnets") . '</th>');
+				print('<th>' . gettext("Times") . '</th>');
+				print('<th>' . gettext("Algo") . '</th>');
+				print('<th>' . gettext("Stats") . '</th>');
 				print('<th><!-- Buttons --></th>');
 				print("</tr\n");
 				print("</thead>\n");
@@ -271,6 +294,10 @@ function print_ipsec_body() {
 
 				foreach ($ikesa['child-sas'] as $childid => $childsa) {
 					print("<tr>");
+					print("<td>\n");
+					print($childsa['name'] . ":<br />");
+					print("#" . $childsa['uniqueid']);
+					print("</td>\n");
 					print("<td>\n");
 
 					if (is_array($childsa['local-ts'])) {
@@ -348,7 +375,7 @@ function print_ipsec_body() {
 
 					print("</td>\n");
 					print("<td>\n");
-					print('<a href="status_ipsec.php?act=childdisconnect&amp;ikeid=' . $con_id . '&amp;ikesaid=' . $childsa['uniqueid'] . '" class="btn btn-xs btn-warning" data-toggle="tooltip" title="' . gettext('Disconnect Child SA') . '" usepost>');
+					print('<a href="status_ipsec.php?act=childdisconnect&amp;ikeid=' . $childsa['name'] . '&amp;ikesaid=' . $childsa['uniqueid'] . '" class="btn btn-xs btn-warning" data-toggle="tooltip" title="' . gettext('Disconnect Child SA') . '" usepost>');
 					print('<i class="fa fa-trash icon-embed-btn"></i>');
 					print(gettext("Disconnect"));
 					print("</a>\n");
@@ -383,8 +410,8 @@ function print_ipsec_body() {
 			}
 
 			print("<tr>\n");
+			print("<td></td>\n");
 			print("<td>\n");
-
 			print(htmlspecialchars($ph1ent['descr']));
 			print("</td>\n");
 			print("<td>\n");
@@ -482,6 +509,7 @@ display_top_tabs($tab_array);
 		<table class="table table-striped table-condensed table-hover sortable-theme-bootstrap" data-sortable>
 			<thead>
 				<tr>
+					<th><?=gettext("IPsec ID")?></th>
 					<th><?=gettext("Description")?></th>
 					<th><?=gettext("Local ID")?></th>
 					<th><?=gettext("Local IP")?></th>
@@ -524,7 +552,7 @@ print_info_box(sprintf(gettext('IPsec can be configured %1$shere%2$s.'), '<a hre
 events.push(function() {
 	ajax_lock = false;		// Mutex so we don't make a call until the previous call is finished
 	sa_open = new Array();	// Array in which to keep the child SA show/hide state
-
+	tryCount = 3;
 	// Fetch the tbody contents from the server
 	function update_table() {
 		if (ajax_lock) {
@@ -539,15 +567,26 @@ events.push(function() {
 				type: "post",
 				data: {
 					ajax: 	"ajax"
+				},
+				error: function(xhr, textStatus, errorThrown){
+					//alert("error.... retrying");
+					if (tryCount > 0){
+						tryCount --;
+						ajax_lock = false;
+						update_table();
+					}
+					return;
 				}
 			}
 		);
 
 		// Deal with the results of the above ajax call
 		ajaxRequest.done(function (response, textStatus, jqXHR) {
-
+			if(textStatus === "success"){
+				tryCount =3;
+			}
 			if (!response) {
-				response = '<tr><td colspan="10"><?=print_info_box(gettext("No IPsec status information available."), "warning", "")?></td></tr>';
+				response = '<tr><td colspan="10"><?=print_info_box(addslashes(gettext("No IPsec status information available.")), "warning", "")?></td></tr>';
 			}
 
 			$('#ipsec-body').html(response);
@@ -555,12 +594,12 @@ events.push(function() {
 
 			// Update "Show child SA" handlers
 			$('[id^=btnchildsa-]').click(function () {
-				show_childsa($(this).prop("id").replace( /^\D+/g, ''));
+				show_childsa($(this).prop("id").replace( 'btnchildsa-', ''));
 			});
 
 			// Check the sa_open array for child SAs that have been opened
-			$('[id^=childsa-con]').each(function(idx) {
-				sa_idx = $(this).prop("id").replace( /^\D+/g, '');
+			$('[id^=childsa-]').each(function(idx) {
+				sa_idx = $(this).prop("id").replace( 'childsa-', '');
 
 				if (sa_open[sa_idx]) {
 					show_childsa(sa_idx);
@@ -577,7 +616,7 @@ events.push(function() {
 
 	function show_childsa(said) {
 		sa_open[said] = true;
-		$('#childsa-con' + said).show();
+		$('#childsa-' + said).show();
 		$('#btnchildsa-con' + said).hide();
 	}
 

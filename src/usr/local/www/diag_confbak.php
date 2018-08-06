@@ -3,7 +3,7 @@
  * diag_confbak.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2005 Colin Smith
  * All rights reserved.
  *
@@ -210,7 +210,7 @@ if (is_array($confvers)):
 			<thead>
 				<tr>
 					<th colspan="2">
-						<button type="submit" name="diff" class="btn btn-info btn-xs" value="<?=gettext("Diff"); ?>">
+						<button type="submit" name="diff" class="btn btn-info btn-xs" value="Diff">
 							<i class="fa fa-exchange icon-embed-btn"></i>
 							<?=gettext("Diff"); ?>
 						</button>
@@ -274,7 +274,7 @@ if (is_array($confvers)):
 ?>
 				<tr>
 					<td colspan="2">
-						<button type="submit" name="diff" class="btn btn-info btn-xs" value="<?=gettext("Diff"); ?>">
+						<button type="submit" name="diff" class="btn btn-info btn-xs" value="Diff">
 							<i class="fa fa-exchange icon-embed-btn"></i>
 							<?=gettext("Diff"); ?>
 						</button>

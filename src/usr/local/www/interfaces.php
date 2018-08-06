@@ -3,7 +3,7 @@
  * interfaces.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2006 Daniel S. Haischt
  * All rights reserved.
  *
@@ -84,6 +84,10 @@ function remove_bad_chars($string) {
 	return preg_replace('/[^a-z_0-9]/i', '', $string);
 }
 
+if (!is_array($config['gateways'])) {
+	$config['gateways'] = array();
+}
+
 if (!is_array($config['gateways']['gateway_item'])) {
 	$config['gateways']['gateway_item'] = array();
 }
@@ -91,6 +95,17 @@ if (!is_array($config['gateways']['gateway_item'])) {
 $a_gateways = &$config['gateways']['gateway_item'];
 
 $interfaces = get_configured_interface_with_descr();
+/* Interfaces which have addresses configired elsewhere and should not be
+ * configured here. See https://redmine.pfsense.org/issues/8687 */
+$no_address_interfaces = array("ovpn", "ipsec", "gif", "gre");
+$show_address_controls = true;
+$realifname = get_real_interface($if);
+foreach ($no_address_interfaces as $ifbl) {
+	if (substr($realifname, 0, strlen($ifbl)) == $ifbl) {
+		$show_address_controls = false;
+	}
+}
+
 $wancfg = &$config['interfaces'][$if];
 $old_wancfg = $wancfg;
 $old_wancfg['realif'] = get_real_interface($if);
@@ -289,6 +304,8 @@ switch ($wancfg['ipaddrv6']) {
 		$pconfig['dhcp6debug'] = isset($wancfg['dhcp6debug']);
 		$pconfig['dhcp6withoutra'] = isset($wancfg['dhcp6withoutra']);
 		$pconfig['dhcp6norelease'] = isset($wancfg['dhcp6norelease']);
+		$pconfig['dhcp6vlanenable'] = isset($wancfg['dhcp6vlanenable']);
+		$pconfig['dhcp6cvpt'] = $wancfg['dhcp6cvpt'];
 		break;
 	case "6to4":
 		$pconfig['type6'] = "6to4";
@@ -539,6 +556,16 @@ if ($_POST['apply']) {
 		}
 	}
 
+	if ($_POST['blockbogons'] == "yes" &&
+	    isset($config['system']['ipv6allow']) &&
+	    (!isset($config['system']['maximumtableentries']) ||
+	     $config['system']['maximumtableentries'] <
+	     $g['minimumtableentries_bogonsv6'])) {
+		$input_errors[] = sprintf(gettext(
+		    "In order to block bogon networks the Firewall Maximum Table Entries value in System / Advanced / Firewall must be increased at least to %s."),
+		    $g['minimumtableentries_bogonsv6']);
+	}
+
 	if (isset($config['dhcpd']) && isset($config['dhcpd'][$if]['enable'])) {
 		if (!preg_match("/^staticv4/", $_POST['type'])) {
 			$input_errors[] = gettext("The DHCP Server is active " .
@@ -669,7 +696,7 @@ if ($_POST['apply']) {
 				$input_errors[] = gettext("A valid interface to track must be selected.");
 			}
 
-			if ($_POST['track6-prefix-id--hex'] != "" && !is_numeric("0x" . $_POST['track6-prefix-id--hex'])) {
+			if ($_POST['track6-prefix-id--hex'] != "" && !ctype_xdigit($_POST['track6-prefix-id--hex'])) {
 				$input_errors[] = gettext("A valid hexadecimal number must be entered for the IPv6 prefix ID.");
 			} else {
 				$track6_prefix_id = intval($_POST['track6-prefix-id--hex'], 16);
@@ -727,7 +754,7 @@ if ($_POST['apply']) {
 			}
 		}
 	}
-	if (($_POST['type'] == 'staticv6') && $_POST['ipaddrv6']) {
+	if (($_POST['type6'] == 'staticv6') && $_POST['ipaddrv6']) {
 		$_POST['ipaddrv6'] = addrtolower($_POST['ipaddrv6']);
 
 		if (!is_ipaddrv6($_POST['ipaddrv6'])) {
@@ -845,7 +872,7 @@ if ($_POST['apply']) {
 
 		unset($min_mtu, $max_mtu);
 
-		if (stristr($wancfg['if'], "_vlan")) {
+		if (interface_is_vlan($wancfg['if']) != NULL) {
 			$realhwif_array = get_parent_interface($wancfg['if']);
 			// Need code to handle MLPPP if we ever use $realhwif for MLPPP handling
 			$parent_realhwif = $realhwif_array[0];
@@ -859,7 +886,7 @@ if ($_POST['apply']) {
 				$input_errors[] = gettext("The MTU of a VLAN cannot be greater than that of its parent interface.");
 		} else {
 			foreach ($config['interfaces'] as $idx => $ifdata) {
-				if (($idx == $if) || !preg_match('/_vlan[0-9]/', $ifdata['if'])) {
+				if (($idx == $if) || interface_is_vlan($ifdata['if']) == NULL) {
 					continue;
 				}
 
@@ -993,6 +1020,7 @@ if ($_POST['apply']) {
 		$gateway_settings4['gateway'] = $_POST['gatewayip4'];
 		$gateway_settings4['descr'] = $_POST['gatewaydescr4'];
 		$gateway_settings4['defaultgw'] = $_POST['defaultgw4'];
+		$gateway_settings4['ipprotocol'] = 'inet';
 		$gw_input_errors = validate_gateway($gateway_settings4, '', $_POST['ipaddr'], $_POST['subnet']);
 		foreach ($gw_input_errors as $input_error_text) {
 			$input_errors[] = $input_error_text;
@@ -1008,6 +1036,7 @@ if ($_POST['apply']) {
 		$gateway_settings6['gateway'] = $_POST['gatewayip6'];
 		$gateway_settings6['descr'] = $_POST['gatewaydescr6'];
 		$gateway_settings6['defaultgw'] = $_POST['defaultgw6'];
+		$gateway_settings6['ipprotocol'] = 'inet6';
 		$gw_input_errors = validate_gateway($gateway_settings6, '', $_POST['ipaddrv6'], $_POST['subnetv6']);
 		foreach ($gw_input_errors as $input_error_text) {
 			$input_errors[] = $input_error_text;
@@ -1056,6 +1085,8 @@ if ($_POST['apply']) {
 		unset($wancfg['track6-prefix-id']);
 		unset($wancfg['dhcp6withoutra']);
 		unset($wancfg['dhcp6norelease']);
+		unset($wancfg['dhcp6vlanenable']);
+		unset($wancfg['dhcp6cvpt']);
 		unset($wancfg['prefix-6rd']);
 		unset($wancfg['prefix-6rd-v4plen']);
 		unset($wancfg['gateway-6rd']);
@@ -1313,6 +1344,15 @@ if ($_POST['apply']) {
 				if ($_POST['dhcp6norelease'] == "yes") {
 					$wancfg['dhcp6norelease'] = true;
 				}
+				if ($_POST['dhcp6vlanenable'] == "yes") {
+					$wancfg['dhcp6vlanenable'] = true;
+				}
+				if (!empty($_POST['dhcp6cvpt'])) {
+					$wancfg['dhcp6cvpt'] = $_POST['dhcp6cvpt'];
+				} else {
+					unset($wancfg['dhcp6cvpt']);
+				}
+
 				if (!empty($_POST['adv_dhcp6_interface_statement_send_options'])) {
 					$wancfg['adv_dhcp6_interface_statement_send_options'] = $_POST['adv_dhcp6_interface_statement_send_options'];
 				}
@@ -1707,7 +1747,7 @@ foreach ($mediaopts as $mediaopt) {
 	}
 }
 
-$pgtitle = array(gettext("Interfaces"), $wancfg['descr']);
+$pgtitle = array(gettext("Interfaces"), "{$wancfg['descr']} ({$realifname})");
 $shortcut_section = "interfaces";
 
 $types4 = array("none" => gettext("None"), "staticv4" => gettext("Static IPv4"), "dhcp" => gettext("DHCP"), "ppp" => gettext("PPP"), "pppoe" => gettext("PPPoE"), "pptp" => gettext("PPTP"), "l2tp" => gettext("L2TP"));
@@ -1795,19 +1835,37 @@ $section->addInput(new Form_Input(
 	$pconfig['descr']
 ))->setHelp('Enter a description (name) for the interface here.');
 
-$section->addInput(new Form_Select(
-	'type',
-	'IPv4 Configuration Type',
-	$pconfig['type'],
-	$types4
-));
-
-$section->addInput(new Form_Select(
-	'type6',
-	'IPv6 Configuration Type',
-	$pconfig['type6'],
-	$types6
-));
+if ($show_address_controls) {
+	$section->addInput(new Form_Select(
+		'type',
+		'IPv4 Configuration Type',
+		$pconfig['type'],
+		$types4
+	));
+	$section->addInput(new Form_Select(
+		'type6',
+		'IPv6 Configuration Type',
+		$pconfig['type6'],
+		$types6
+	));
+} else {
+	$section->addInput(new Form_StaticText(
+		'IPv4/IPv6 Configuration',
+		"This interface type does not support manual address configuration on this page. "
+	));
+	$section->addInput(new Form_Input(
+		'type',
+		null,
+		'hidden',
+		'none'
+	));
+	$section->addInput(new Form_Input(
+		'type6',
+		null,
+		'hidden',
+		'none'
+	));
+}
 
 $macaddress = new Form_Input(
 	'spoofmac',
@@ -2244,6 +2302,35 @@ $section->addInput(new Form_Checkbox(
 	'dhcp6c will send a release to the ISP on exit, some ISPs then release the allocated address or prefix. This option prevents that signal ever being sent',
 	$pconfig['dhcp6norelease']
 ));
+
+$group = new Form_Group('DHCP6 VLAN Priority');
+
+$vlanprio = array(
+	"bk" => "Background (BK, 0)",
+	"be" => "Best Effort (BE, 1)",
+	"ee" => "Excellent Effort (EE, 2)",
+	"ca" => "Critical Applications (CA, 3)",
+	"vi" => "Video (VI, 4)",
+	"vo" => "Voice (VO, 5)",
+	"ic" => "Internetwork Control (IC, 6)",
+	"nc" => "Network Control (NC, 7)");
+
+$group->add(new Form_Checkbox(
+	'dhcp6vlanenable',
+	null,
+	'Enable dhcp6c VLAN Priority tagging',
+	$pconfig['dhcp6vlanenable']
+))->setHelp('Normally off unless specifically required by the ISP.');
+
+$group->add(new Form_Select(
+	'dhcp6cvpt',
+	'VLAN Prio',
+	$pconfig['dhcp6cvpt'],
+	$vlanprio
+))->setHelp('Choose 802.1p priority to set.');
+
+$section->add($group);
+
 $section->addInput(new Form_Input(
 	'adv_dhcp6_config_file_override_path',
 	'Configuration File Override',
@@ -3239,7 +3326,7 @@ $section->addInput(new Form_Checkbox(
 	'yes'
 ))->setHelp('Blocks traffic from reserved IP addresses (but not RFC 1918) or not yet assigned by IANA. Bogons are prefixes that should ' .
 			'never appear in the Internet routing table, and so should not appear as the source address in any packets received.%1$s' .
-			'Note: The update frequency can be changed under System->Advanced Firewall/NAT settings.', '<br />');
+			'Note: The update frequency can be changed under System > Advanced, Firewall & NAT settings.', '<br />');
 
 $form->add($section);
 

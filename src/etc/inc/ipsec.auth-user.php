@@ -5,7 +5,7 @@
  *
  * part of pfSense (https://www.pfsense.org)
  * Copyright (c) 2008 Shrew Soft Inc
- * Copyright (c) 2008-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2008-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -29,7 +29,6 @@
 
 require_once("globals.inc");
 require_once("config.inc");
-require_once("radius.inc");
 require_once("auth.inc");
 require_once("interfaces.inc");
 

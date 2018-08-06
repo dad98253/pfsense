@@ -3,7 +3,7 @@
 # builder_common.sh
 #
 # part of pfSense (https://www.pfsense.org)
-# Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+# Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
 # All rights reserved.
 #
 # FreeSBIE portions of the code
@@ -77,17 +77,28 @@ core_pkg_create() {
 	local _flavor="${2}"
 	local _version="${3}"
 	local _root="${4}"
-	local _filter="${5}"
+	local _findroot="${5}"
+	local _filter="${6}"
 
 	local _template_path=${BUILDER_TOOLS}/templates/core_pkg/${_template}
+
+	# Use default pkg repo to obtain ABI and ALTABI
+	local _abi=$(sed -e "s/%%ARCH%%/${TARGET_ARCH}/g" \
+	    ${PKG_REPO_DEFAULT%%.conf}.abi)
+	local _altabi_arch=$(get_altabi_arch ${TARGET_ARCH})
+	local _altabi=$(sed -e "s/%%ARCH%%/${_altabi_arch}/g" \
+	    ${PKG_REPO_DEFAULT%%.conf}.altabi)
 
 	${BUILDER_SCRIPTS}/create_core_pkg.sh \
 		-t "${_template_path}" \
 		-f "${_flavor}" \
 		-v "${_version}" \
 		-r "${_root}" \
+		-s "${_findroot}" \
 		-F "${_filter}" \
 		-d "${CORE_PKG_REAL_PATH}/All" \
+		-a "${_abi}" \
+		-A "${_altabi}" \
 		|| print_error_pfS
 }
 
@@ -161,11 +172,12 @@ build_all_kernels() {
 		ensure_kernel_exists $KERNEL_DESTDIR
 
 		echo ">>> Creating pkg of $KERNEL_NAME-debug kernel to staging area..."  | tee -a ${LOGFILE}
-		core_pkg_create kernel-debug ${KERNEL_NAME} ${CORE_PKG_VERSION} ${KERNEL_DESTDIR} \*.ko.debug
+		core_pkg_create kernel-debug ${KERNEL_NAME} ${CORE_PKG_VERSION} ${KERNEL_DESTDIR} \
+		    "./usr/lib/debug/boot" \*.debug
 		rm -rf ${KERNEL_DESTDIR}/usr
 
 		echo ">>> Creating pkg of $KERNEL_NAME kernel to staging area..."  | tee -a ${LOGFILE}
-		core_pkg_create kernel ${KERNEL_NAME} ${CORE_PKG_VERSION} ${KERNEL_DESTDIR}
+		core_pkg_create kernel ${KERNEL_NAME} ${CORE_PKG_VERSION} ${KERNEL_DESTDIR} "./boot/kernel ./boot/modules"
 
 		rm -rf $KERNEL_DESTDIR 2>&1 1>/dev/null
 	done
@@ -187,8 +199,8 @@ install_default_kernel() {
 		print_error_pfS
 	fi
 
-	# Lock kernel to avoid user end up removing it for any reason
-	pkg_chroot ${FINAL_CHROOT_DIR} lock -q -y $(get_pkg_name kernel-${KERNEL_NAME})
+	# Set kernel pkg as vital to avoid user end up removing it for any reason
+	pkg_chroot ${FINAL_CHROOT_DIR} set -v 1 -y $(get_pkg_name kernel-${KERNEL_NAME})
 
 	if [ ! -f $FINAL_CHROOT_DIR/boot/kernel/kernel.gz ]; then
 		echo ">>> ERROR: No kernel installed on $FINAL_CHROOT_DIR and the resulting image will be unusable. STOPPING!" | tee -a ${LOGFILE}
@@ -255,10 +267,19 @@ make_world() {
 		-d ${STAGE_CHROOT_DIR} \
 		|| print_error_pfS
 
+	# Use the builder cross compiler from obj to produce the final binary.
+	if [ "${TARGET_ARCH}" == "$(uname -p)" ]; then
+		BUILD_CC="${MAKEOBJDIRPREFIX}/${FREEBSD_SRC_DIR}/tmp/usr/bin/cc"
+	else
+		BUILD_CC="${MAKEOBJDIRPREFIX}/${TARGET}.${TARGET_ARCH}${FREEBSD_SRC_DIR}/tmp/usr/bin/cc"
+	fi
+
+	[ -f "${BUILD_CC}" ] || print_error_pfS
+
 	# XXX It must go to the scripts
 	[ -d "${STAGE_CHROOT_DIR}/usr/local/bin" ] \
 		|| mkdir -p ${STAGE_CHROOT_DIR}/usr/local/bin
-	makeargs="DESTDIR=${STAGE_CHROOT_DIR}"
+	makeargs="CC=${BUILD_CC} DESTDIR=${STAGE_CHROOT_DIR}"
 	echo ">>> Building and installing crypto tools and athstats for ${TARGET} architecture... (Starting - $(LC_ALL=C date))" | tee -a ${LOGFILE}
 	(script -aq $LOGFILE make -C ${FREEBSD_SRC_DIR}/tools/tools/crypto ${makeargs} clean all install || print_error_pfS;) | egrep '^>>>' | tee -a ${LOGFILE}
 	# XXX FIX IT
@@ -269,8 +290,11 @@ make_world() {
 		echo ">>> Building gnid... " | tee -a ${LOGFILE}
 		(\
 			cd ${GNID_SRC_DIR} && \
-			make INCLUDE_DIR=${GNID_INCLUDE_DIR} \
-			LIBCRYPTO_DIR=${GNID_LIBCRYPTO_DIR} clean gnid \
+			make \
+				CC=${BUILD_CC} \
+				INCLUDE_DIR=${GNID_INCLUDE_DIR} \
+				LIBCRYPTO_DIR=${GNID_LIBCRYPTO_DIR} \
+			clean gnid \
 		) || print_error_pfS
 		install -o root -g wheel -m 0700 ${GNID_SRC_DIR}/gnid \
 			${STAGE_CHROOT_DIR}/usr/sbin \
@@ -326,8 +350,8 @@ create_ova_image() {
 	if [ -z "${OVA_SWAP_PART_SIZE_IN_GB}" -o "${OVA_SWAP_PART_SIZE_IN_GB}" = "0" ]; then
 		# first partition size (freebsd-ufs)
 		local OVA_FIRST_PART_SIZE_IN_GB=${VMDK_DISK_CAPACITY_IN_GB}
-		# Calculate real first partition size, removing 128 blocks (65536 bytes) beginning/loader
-		local OVA_FIRST_PART_SIZE=$((${OVA_FIRST_PART_SIZE_IN_GB}*1024*1024*1024-65536))
+		# Calculate real first partition size, removing 256 blocks (131072 bytes) beginning/loader
+		local OVA_FIRST_PART_SIZE=$((${OVA_FIRST_PART_SIZE_IN_GB}*1024*1024*1024-131072))
 		# Unset swap partition size variable
 		unset OVA_SWAP_PART_SIZE
 		# Parameter used by mkimg
@@ -337,8 +361,8 @@ create_ova_image() {
 		local OVA_FIRST_PART_SIZE_IN_GB=$((VMDK_DISK_CAPACITY_IN_GB-OVA_SWAP_PART_SIZE_IN_GB))
 		# Use first partition size in g
 		local OVA_FIRST_PART_SIZE="${OVA_FIRST_PART_SIZE_IN_GB}g"
-		# Calculate real swap size, removing 128 blocks (65536 bytes) beginning/loader
-		local OVA_SWAP_PART_SIZE=$((${OVA_SWAP_PART_SIZE_IN_GB}*1024*1024*1024-65536))
+		# Calculate real swap size, removing 256 blocks (131072 bytes) beginning/loader
+		local OVA_SWAP_PART_SIZE=$((${OVA_SWAP_PART_SIZE_IN_GB}*1024*1024*1024-131072))
 		# Parameter used by mkimg
 		local OVA_SWAP_PART_PARAM="-p freebsd-swap/swap0::${OVA_SWAP_PART_SIZE}"
 	fi
@@ -641,13 +665,14 @@ clone_to_staging_area() {
 	pkg_bootstrap ${STAGE_CHROOT_DIR}
 
 	# Make sure correct repo is available on tmp dir
-	mkdir -p ${STAGE_CHROOT_DIR}/tmp/pkg-repos
+	mkdir -p ${STAGE_CHROOT_DIR}/tmp/pkg/pkg-repos
 	setup_pkg_repo \
-		${PKG_REPO_DEFAULT} \
-		${STAGE_CHROOT_DIR}/tmp/pkg-repos/repo.conf \
+		${PKG_REPO_BUILD} \
+		${STAGE_CHROOT_DIR}/tmp/pkg/pkg-repos/repo.conf \
 		${TARGET} \
 		${TARGET_ARCH} \
-		staging
+		staging \
+		${STAGE_CHROOT_DIR}/tmp/pkg/pkg.conf
 
 	echo "Done!"
 }
@@ -697,6 +722,10 @@ customize_stagearea_for_image() {
 	pkg_chroot_add ${FINAL_CHROOT_DIR} rc
 	pkg_chroot_add ${FINAL_CHROOT_DIR} base
 
+	# Set base/rc pkgs as vital to avoid user end up removing it for any reason
+	pkg_chroot ${FINAL_CHROOT_DIR} set -v 1 -y $(get_pkg_name rc)
+	pkg_chroot ${FINAL_CHROOT_DIR} set -v 1 -y $(get_pkg_name base)
+
 	if [ "${_image_type}" = "iso" -o \
 	     "${_image_type}" = "memstick" -o \
 	     "${_image_type}" = "memstickserial" -o \
@@ -728,12 +757,15 @@ customize_stagearea_for_image() {
 	    -d ${BUILDER_TOOLS}/templates/custom_logos/${_image_variant} ]; then
 		mkdir -p ${FINAL_CHROOT_DIR}/usr/local/share/${PRODUCT_NAME}/custom_logos
 		cp -f \
-			${BUILDER_TOOLS}/templates/custom_logos/${_image_variant}/*.png \
+			${BUILDER_TOOLS}/templates/custom_logos/${_image_variant}/*.svg \
+			${FINAL_CHROOT_DIR}/usr/local/share/${PRODUCT_NAME}/custom_logos
+		cp -f \
+			${BUILDER_TOOLS}/templates/custom_logos/${_image_variant}/*.css \
 			${FINAL_CHROOT_DIR}/usr/local/share/${PRODUCT_NAME}/custom_logos
 	fi
 
 	# Remove temporary repo conf
-	rm -rf ${FINAL_CHROOT_DIR}/tmp/pkg-repos
+	rm -rf ${FINAL_CHROOT_DIR}/tmp/pkg
 }
 
 create_distribution_tarball() {
@@ -780,6 +812,7 @@ create_iso_image() {
 
 	rm -f ${LOADERCONF} ${BOOTCONF} >/dev/null 2>&1
 	echo 'autoboot_delay="3"' > ${LOADERCONF}
+	echo 'kern.cam.boot_delay=10000' >> ${LOADERCONF}
 	cat ${LOADERCONF} > ${FINAL_CHROOT_DIR}/boot/loader.conf
 
 	create_distribution_tarball
@@ -824,7 +857,6 @@ create_memstick_image() {
 	install_default_kernel ${DEFAULT_KERNEL}
 
 	echo ">>> Creating memstick to ${_image_path}." 2>&1 | tee -a ${LOGFILE}
-	echo "kern.cam.boot_delay=10000" >> ${INSTALLER_CHROOT_DIR}/boot/loader.conf.local
 
 	BOOTCONF=${INSTALLER_CHROOT_DIR}/boot.config
 	LOADERCONF=${INSTALLER_CHROOT_DIR}/boot/loader.conf
@@ -832,13 +864,17 @@ create_memstick_image() {
 	rm -f ${LOADERCONF} ${BOOTCONF} >/dev/null 2>&1
 
 	echo 'autoboot_delay="3"' > ${LOADERCONF}
+	echo 'kern.cam.boot_delay=10000' >> ${LOADERCONF}
 	cat ${LOADERCONF} > ${FINAL_CHROOT_DIR}/boot/loader.conf
 
 	create_distribution_tarball
 
-	sh ${FREEBSD_SRC_DIR}/release/${TARGET}/make-memstick.sh \
-		${INSTALLER_CHROOT_DIR} \
-		${_image_path}
+	FSLABEL=$(echo ${PRODUCT_NAME} | tr '[:lower:]' '[:upper:]')
+
+	sh ${FREEBSD_SRC_DIR}/release/${TARGET}/mkisoimages.sh -b \
+		${FSLABEL} \
+		${_image_path} \
+		${INSTALLER_CHROOT_DIR}
 
 	if [ ! -f "${_image_path}" ]; then
 		echo "ERROR! memstick image was not built"
@@ -864,7 +900,6 @@ create_memstick_serial_image() {
 	install_default_kernel ${DEFAULT_KERNEL}
 
 	echo ">>> Creating serial memstick to ${MEMSTICKSERIALPATH}." 2>&1 | tee -a ${LOGFILE}
-	echo "kern.cam.boot_delay=10000" >> ${INSTALLER_CHROOT_DIR}/boot/loader.conf.local
 
 	BOOTCONF=${INSTALLER_CHROOT_DIR}/boot.config
 	LOADERCONF=${INSTALLER_CHROOT_DIR}/boot/loader.conf
@@ -874,6 +909,7 @@ create_memstick_serial_image() {
 
 	# Activate serial console+video console in loader.conf
 	echo 'autoboot_delay="3"' > ${LOADERCONF}
+	echo 'kern.cam.boot_delay=10000' >> ${LOADERCONF}
 	echo 'boot_multicons="YES"' >> ${LOADERCONF}
 	echo 'boot_serial="YES"' >> ${LOADERCONF}
 	echo 'console="comconsole,vidconsole"' >> ${LOADERCONF}
@@ -912,7 +948,6 @@ create_memstick_adi_image() {
 	install_default_kernel ${DEFAULT_KERNEL}
 
 	echo ">>> Creating serial memstick to ${MEMSTICKADIPATH}." 2>&1 | tee -a ${LOGFILE}
-	echo "kern.cam.boot_delay=10000" >> ${INSTALLER_CHROOT_DIR}/boot/loader.conf.local
 
 	BOOTCONF=${INSTALLER_CHROOT_DIR}/boot.config
 	LOADERCONF=${INSTALLER_CHROOT_DIR}/boot/loader.conf
@@ -922,6 +957,7 @@ create_memstick_adi_image() {
 
 	# Activate serial console+video console in loader.conf
 	echo 'autoboot_delay="3"' > ${LOADERCONF}
+	echo 'kern.cam.boot_delay=10000' >> ${LOADERCONF}
 	echo 'boot_serial="YES"' >> ${LOADERCONF}
 	echo 'console="comconsole"' >> ${LOADERCONF}
 	echo 'comconsole_speed="115200"' >> ${LOADERCONF}
@@ -949,6 +985,21 @@ create_memstick_adi_image() {
 	echo ">>> MEMSTICKADI created: $(LC_ALL=C date)" | tee -a ${LOGFILE}
 }
 
+get_altabi_arch() {
+	local _target_arch="$1"
+
+	if [ "${_target_arch}" = "amd64" ]; then
+		echo "x86:64"
+	elif [ "${_target_arch}" = "i386" ]; then
+		echo "x86:32"
+	elif [ "${_target_arch}" = "armv6" ]; then
+		echo "32:el:eabi:hardfp"
+	else
+		echo ">>> ERROR: Invalid arch"
+		print_error_pfS
+	fi
+}
+
 # Create pkg conf on desired place with desired arch/branch
 setup_pkg_repo() {
 	if [ -z "${4}" ]; then
@@ -960,6 +1011,7 @@ setup_pkg_repo() {
 	local _arch="${3}"
 	local _target_arch="${4}"
 	local _staging="${5}"
+	local _pkg_conf="${6}"
 
 	if [ -z "${_template}" -o ! -f "${_template}" ]; then
 		echo ">>> ERROR: It was not possible to find pkg conf template ${_template}"
@@ -988,8 +1040,31 @@ setup_pkg_repo() {
 		-e "s,%%PKG_REPO_SERVER_RELEASE%%,${_pkg_repo_server_release},g" \
 		-e "s,%%POUDRIERE_PORTS_NAME%%,${POUDRIERE_PORTS_NAME},g" \
 		-e "s/%%PRODUCT_NAME%%/${PRODUCT_NAME}/g" \
+		-e "s/%%REPO_BRANCH_PREFIX%%/${REPO_BRANCH_PREFIX}/g" \
 		${_template} \
 		> ${_target}
+
+	local ALTABI_ARCH=$(get_altabi_arch ${_target_arch})
+
+	ABI=$(cat ${_template%%.conf}.abi 2>/dev/null \
+	    | sed -e "s/%%ARCH%%/${_target_arch}/g")
+	ALTABI=$(cat ${_template%%.conf}.altabi 2>/dev/null \
+	    | sed -e "s/%%ARCH%%/${ALTABI_ARCH}/g")
+
+	if [ -n "${_pkg_conf}" -a -n "${ABI}" -a -n "${ALTABI}" ]; then
+		mkdir -p $(dirname ${_pkg_conf})
+		echo "ABI=${ABI}" > ${_pkg_conf}
+		echo "ALTABI=${ALTABI}" >> ${_pkg_conf}
+	fi
+}
+
+depend_check() {
+	for _pkg in ${BUILDER_PKG_DEPENDENCIES}; do
+		if ! pkg info -e ${_pkg}; then
+			echo "Missing dependency (${_pkg})."
+			print_error_pfS
+		fi
+	done
 }
 
 # This routine ensures any ports / binaries that the builder
@@ -1008,7 +1083,7 @@ builder_setup() {
 
 		local _arch=$(uname -m)
 		setup_pkg_repo \
-			${PKG_REPO_DEFAULT} \
+			${PKG_REPO_BUILD} \
 			${PKG_REPO_PATH} \
 			${_arch} \
 			${_arch} \
@@ -1086,8 +1161,11 @@ pkg_chroot() {
 	cp -f /etc/resolv.conf ${_root}/etc/resolv.conf
 	touch ${BUILDER_LOGS}/install_pkg_install_ports.txt
 	local _params=""
-	if [ -f "${_root}/tmp/pkg-repos/repo.conf" ]; then
-		_params="--repo-conf-dir /tmp/pkg-repos "
+	if [ -f "${_root}/tmp/pkg/pkg-repos/repo.conf" ]; then
+		_params="--repo-conf-dir /tmp/pkg/pkg-repos "
+	fi
+	if [ -f "${_root}/tmp/pkg/pkg.conf" ]; then
+		_params="${_params} --config /tmp/pkg/pkg.conf "
 	fi
 	script -aq ${BUILDER_LOGS}/install_pkg_install_ports.txt \
 		chroot ${_root} pkg ${_params}$@ >/dev/null 2>&1
@@ -1127,7 +1205,7 @@ pkg_bootstrap() {
 	local _root=${1:-"${STAGE_CHROOT_DIR}"}
 
 	setup_pkg_repo \
-		${PKG_REPO_DEFAULT} \
+		${PKG_REPO_BUILD} \
 		${_root}${PKG_REPO_PATH} \
 		${TARGET} \
 		${TARGET_ARCH} \
@@ -1164,6 +1242,8 @@ install_pkg_install_ports() {
 	fi
 	# Make sure required packages are set as non-automatic
 	pkg_chroot ${STAGE_CHROOT_DIR} set -A 0 pkg ${MAIN_PKG} ${custom_package_list}
+	# pkg and MAIN_PKG are vital
+	pkg_chroot ${STAGE_CHROOT_DIR} set -y -v 1 pkg ${MAIN_PKG}
 	# Remove unnecessary packages
 	pkg_chroot ${STAGE_CHROOT_DIR} autoremove
 	echo "Done!"
@@ -1550,10 +1630,10 @@ poudriere_init() {
 	fi
 
 	# Make sure poudriere is installed
-	if ! pkg info --quiet poudriere-devel; then
-		echo ">>> Installing poudriere-devel..." | tee -a ${LOGFILE}
-		if ! pkg install poudriere-devel >/dev/null 2>&1; then
-			echo ">>> ERROR: poudriere-devel was not installed, aborting..." | tee -a ${LOGFILE}
+	if [ ! -f /usr/local/bin/poudriere ]; then
+		echo ">>> Installing poudriere..." | tee -a ${LOGFILE}
+		if ! pkg install poudriere >/dev/null 2>&1; then
+			echo ">>> ERROR: poudriere was not installed, aborting..." | tee -a ${LOGFILE}
 			print_error_pfS
 		fi
 	fi
@@ -1685,6 +1765,7 @@ poudriere_update_ports() {
 
 poudriere_bulk() {
 	local _archs=$(poudriere_possible_archs)
+	local _makeconf
 
 	LOGFILE=${BUILDER_LOGS}/poudriere.log
 
@@ -1700,9 +1781,9 @@ poudriere_bulk() {
 	[ -d /usr/local/etc/poudriere.d ] || \
 		mkdir -p /usr/local/etc/poudriere.d
 
+	_makeconf=/usr/local/etc/poudriere.d/${POUDRIERE_PORTS_NAME}-make.conf
 	if [ -f "${BUILDER_TOOLS}/conf/pfPorts/make.conf" ]; then
-		cp -f "${BUILDER_TOOLS}/conf/pfPorts/make.conf" \
-			/usr/local/etc/poudriere.d/${POUDRIERE_PORTS_NAME}-make.conf
+		cp -f "${BUILDER_TOOLS}/conf/pfPorts/make.conf" ${_makeconf}
 	fi
 
 	cat <<EOF >>/usr/local/etc/poudriere.d/${POUDRIERE_PORTS_NAME}-make.conf
@@ -1711,8 +1792,34 @@ PKG_REPO_BRANCH_RELEASE=${PKG_REPO_BRANCH_RELEASE}
 PKG_REPO_SERVER_DEVEL=${PKG_REPO_SERVER_DEVEL}
 PKG_REPO_SERVER_RELEASE=${PKG_REPO_SERVER_RELEASE}
 POUDRIERE_PORTS_NAME=${POUDRIERE_PORTS_NAME}
+PFSENSE_DEFAULT_REPO=${PFSENSE_DEFAULT_REPO}
 PRODUCT_NAME=${PRODUCT_NAME}
+REPO_BRANCH_PREFIX=${REPO_BRANCH_PREFIX}
 EOF
+
+	local _value=""
+	for jail_arch in ${_archs}; do
+		eval "_value=\${PKG_REPO_BRANCH_DEVEL_${jail_arch##*.}}"
+		if [ -n "${_value}" ]; then
+			echo "PKG_REPO_BRANCH_DEVEL_${jail_arch##*.}=${_value}" \
+				>> ${_makeconf}
+		fi
+		eval "_value=\${PKG_REPO_BRANCH_RELEASE_${jail_arch##*.}}"
+		if [ -n "${_value}" ]; then
+			echo "PKG_REPO_BRANCH_RELEASE_${jail_arch##*.}=${_value}" \
+				>> ${_makeconf}
+		fi
+		eval "_value=\${PKG_REPO_SERVER_DEVEL_${jail_arch##*.}}"
+		if [ -n "${_value}" ]; then
+			echo "PKG_REPO_SERVER_DEVEL_${jail_arch##*.}=${_value}" \
+				>> ${_makeconf}
+		fi
+		eval "_value=\${PKG_REPO_SERVER_RELEASE_${jail_arch##*.}}"
+		if [ -n "${_value}" ]; then
+			echo "PKG_REPO_SERVER_RELEASE_${jail_arch##*.}=${_value}" \
+				>> ${_makeconf}
+		fi
+	done
 
 	# Change version of pfSense meta ports for snapshots
 	if [ -z "${_IS_RELEASE}" ]; then

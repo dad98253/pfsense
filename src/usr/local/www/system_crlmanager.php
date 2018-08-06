@@ -3,7 +3,7 @@
  * system_crlmanager.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -144,7 +144,7 @@ if ($act == "addcert") {
 	}
 
 	if (!$input_errors) {
-		$reason = (empty($pconfig['crlreason'])) ? OCSP_REVOKED_STATUS_UNSPECIFIED : $pconfig['crlreason'];
+		$reason = (empty($pconfig['crlreason'])) ? 0 : $pconfig['crlreason'];
 		cert_revoke($cert, $crl, $reason);
 		// refresh IPsec and OpenVPN CRLs
 		openvpn_refresh_crls();
@@ -388,7 +388,7 @@ if ($act == "new" || $act == gettext("Save") || $input_errors) {
 		'Lifetime (Days)',
 		'number',
 		$pconfig['lifetime'],
-		[max => '9999']
+		['max' => '9999']
 	));
 
 	$section->addInput(new Form_Input(
@@ -703,4 +703,3 @@ events.push(function() {
 </script>
 
 <?php include("foot.inc");
-

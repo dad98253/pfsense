@@ -3,7 +3,7 @@
  * ntp_status.widget.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,8 +18,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-$nocsrf = true;
 
 require_once("guiconfig.inc");
 require_once("pfsense-utils.inc");
@@ -197,9 +195,16 @@ if ($_REQUEST['updateme']) {
 <?php if ($widget_first_instance): ?>
 <script type="text/javascript">
 //<![CDATA[
-var ntp_d = new Date('<?=date_format(date_create(), 'c')?>');
-var tz = '<?=date('T');?>';
+// Have to convet the date to UTC time to match the PHP clock not the local client clock.
+function convertDateToUTC(date,offset) {
+	var hours_offset = offset/3600;
+	var minute_offset = (offset % 3600)/60;
+	var d = new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), date.getUTCHours() + hours_offset, date.getUTCMinutes() + minute_offset, date.getUTCSeconds())
+	return d;
+}
 
+var ntp_d = convertDateToUTC(new Date('<?=date_format(date_create(), 'c')?>'), '<?=date('Z')?>');
+var tz = '<?=date('T');?>';
 setInterval(function() {
 	ntp_d.setSeconds(ntp_d.getSeconds() + 1);
 	var thisSecond = ntp_d.getSeconds();

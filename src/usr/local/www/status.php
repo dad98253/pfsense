@@ -3,7 +3,7 @@
  * status.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://neon1.net/m0n0wall)
@@ -113,6 +113,12 @@ function doCmdT($title, $command, $method) {
 				$line = preg_replace("/<crypto_password2>.*?<\\/crypto_password2>/", "<crypto_password2>xxxxx</crypto_password2>", $line);
 				$line = preg_replace("/<md5sigpass>.*?<\\/md5sigpass>/", "<md5sigpass>xxxxx</md5sigpass>", $line);
 				$line = preg_replace("/<md5sigkey>.*?<\\/md5sigkey>/", "<md5sigkey>xxxxx</md5sigkey>", $line);
+				$line = preg_replace("/<redis_password>.*?<\\/redis_password>/", "<redis_password>xxxxx</redis_password>", $line);
+				$line = preg_replace("/<redis_passwordagain>.*?<\\/redis_passwordagain>/", "<redis_passwordagain>xxxxx</redis_passwordagain>", $line);
+				$line = preg_replace("/<varclientsharedsecret>.*?<\\/varclientsharedsecret>/", "<varclientsharedsecret>xxxxx</varclientsharedsecret>", $line);
+				$line = preg_replace("/<varclientpasswordinput>.*?<\\/varclientpasswordinput>/", "<varclientpasswordinput>xxxxx</varclientpasswordinput>", $line);
+				$line = preg_replace("/<varusersmotpinitsecret>.*?<\\/varusersmotpinitsecret>/", "<varusersmotpinitsecret>xxxxx</varusersmotpinitsecret>", $line);
+				$line = preg_replace("/<varusersmotppin>.*?<\\/varusersmotppin>/", "<varusersmotppin>xxxxx</varusersmotppin>", $line);
 				$line = str_replace("\t", "    ", $line);
 				echo htmlspecialchars($line, ENT_NOQUOTES);
 				fwrite($ofd, $line);
@@ -200,7 +206,7 @@ function get_firewall_info() {
 
 	$serial = system_get_serial();
 	if (!empty($serial)) {
-		$firewall_info .= "<br/>SN/UUID: " . htmlspecialchars($serial);
+		$firewall_info .= "<br/>Serial: " . htmlspecialchars($serial);
 	}
 
 	if (!empty($g['product_version_string'])) {
@@ -260,6 +266,11 @@ defCmdT("Network-ARP Table", "/usr/sbin/arp -an");
 defCmdT("Network-NDP Table", "/usr/sbin/ndp -na");
 defCmdT("OS-Kernel VMStat", "/usr/bin/vmstat -afimsz");
 
+/* If a device has a switch, put the switch configuration in the status output */
+if (file_exists("/dev/etherswitch0")) {
+	defCmdT("Network-Switch Configuration", "/sbin/etherswitchcfg -f /dev/etherswitch0 info");
+}
+
 /* Firewall rules and info */
 defCmdT("Firewall-Generated Ruleset", "/bin/cat {$g['tmp_path']}/rules.debug");
 defCmdT("Firewall-Generated Ruleset Limiters", "/bin/cat {$g['tmp_path']}/rules.limiter");
@@ -295,7 +306,7 @@ defCmdT("config.xml", "dumpconfigxml");
 defCmdT("DNS-Resolution Configuration", "/bin/cat /etc/resolv.conf");
 defCmdT("DHCP-IPv4 Configuration", "/bin/cat /var/dhcpd/etc/dhcpd.conf");
 defCmdT("DHCP-IPv6-Configuration", "/bin/cat /var/dhcpd/etc/dhcpdv6.conf");
-defCmdT("IPsec-strongSwan Configuration", "/bin/cat /var/etc/ipsec/strongswan.conf");
+defCmdT("IPsec-strongSwan Configuration", "/bin/cat /var/etc/ipsec/strongswan.conf | /usr/bin/sed 's/[[:blank:]]secret = .*//'");
 defCmdT("IPsec-Configuration", "/bin/cat /var/etc/ipsec/ipsec.conf");
 defCmdT("IPsec-Status", "/usr/local/sbin/ipsec statusall");
 defCmdT("IPsec-SPD", "/sbin/setkey -DP");
@@ -323,7 +334,8 @@ defCmdT("Log-L2TP-Last 1000 entries", "/usr/local/sbin/clog /var/log/l2tps.log 2
 defCmdT("Log-NTP-Last 1000 entries", "/usr/local/sbin/clog /var/log/ntpd.log 2>&1 | tail -n 1000");
 defCmdT("Log-OpenVPN-Last 1000 entries", "/usr/local/sbin/clog /var/log/openvpn.log 2>&1 | tail -n 1000");
 defCmdT("Log-Captive Portal Authentication-Last 1000 entries", "/usr/local/sbin/clog /var/log/portalauth.log 2>&1 | tail -n 1000");
-defCmdT("Log-PPP-Last 1000 entries", "/usr/local/sbin/clog /var/log/poes.log 2>&1 | tail -n 1000");
+defCmdT("Log-PPP-Last 1000 entries", "/usr/local/sbin/clog /var/log/ppp.log 2>&1 | tail -n 1000");
+defCmdT("Log-PPPoE Server-Last 1000 entries", "/usr/local/sbin/clog /var/log/poes.log 2>&1 | tail -n 1000");
 defCmdT("Log-relayd-Last 1000 entries", "/usr/local/sbin/clog /var/log/relayd.log 2>&1 | tail -n 1000");
 defCmdT("Log-DNS-Last 1000 entries", "/usr/local/sbin/clog /var/log/resolver.log 2>&1 | tail -n 1000");
 defCmdT("Log-Routing-Last 1000 entries", "/usr/local/sbin/clog /var/log/routing.log 2>&1 | tail -n 1000");
@@ -335,7 +347,7 @@ defCmdT("OS-Message Buffer", "/sbin/dmesg -a");
 defCmdT("OS-Message Buffer (Boot)", "/bin/cat /var/log/dmesg.boot");
 
 /* OS/Hardware Status */
-defCmdT("OS-sysctl values", "/sbin/sysctl -a");
+defCmdT("OS-sysctl values", "/sbin/sysctl -aq");
 defCmdT("OS-Kernel Environment", "/bin/kenv");
 defCmdT("OS-Installed Packages", "/usr/sbin/pkg info");
 defCmdT("Hardware-PCI Devices", "/usr/sbin/pciconf -lvb");

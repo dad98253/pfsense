@@ -3,7 +3,7 @@
  * netgate_services_and_support.widget.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -30,7 +30,6 @@
 
 require_once("guiconfig.inc");
 
-$nocsrf = true;
 $supportfile = "/var/db/support.json";
 $idfile = "/var/db/uniqueid";
 $FQDN = "https://ews.netgate.com/support";
@@ -137,12 +136,18 @@ print("</div>");
 
 				success: function(data){
 					if (data.length > 0) {
-						var obj = JSON.parse(data);
+						try{
+							var obj = JSON.parse(data);
 
-						$('#summary').removeClass("alert");
-						$('#summary').removeClass("alert-warning");
-						$('#summary').html(obj.summary);
-						$('#htmltxt').html(obj.htmltext);
+							$('#summary').removeClass("alert");
+							$('#summary').removeClass("alert-warning");
+							$('#summary').html(obj.summary);
+							$('#htmltxt').html(obj.htmltext);
+
+						}catch(e){
+
+						}
+
 					}
 				},
 

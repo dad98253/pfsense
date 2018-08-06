@@ -3,7 +3,7 @@
  * interfaces.widget.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * Copyright (c)  2007 Scott Dale
  * All rights reserved.
  *
@@ -19,8 +19,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-$nocsrf = true;
 
 require_once("guiconfig.inc");
 require_once("pfsense-utils.inc");
@@ -58,7 +56,7 @@ if ($_REQUEST['widgetkey']) {
 
 ?>
 
-<div class="table-responsive" id="ifaces_status_<?=$widgetkey?>">
+<div class="table-responsive" id="ifaces_status_<?=htmlspecialchars($widgetkey)?>">
 	<table class="table table-striped table-hover table-condensed">
 		<tbody>
 
@@ -161,7 +159,7 @@ endif;
 	<?=gen_customwidgettitle_div($widgetconfig['title']); ?>
 	<div class="panel panel-default col-sm-10">
 		<div class="panel-body">
-			<input type="hidden" name="widgetkey" value="<?=$widgetkey; ?>">
+			<input type="hidden" name="widgetkey" value="<?=htmlspecialchars($widgetkey); ?>">
 			<div class="table responsive">
 				<table class="table table-striped table-hover table-condensed">
 					<thead>
@@ -215,12 +213,12 @@ if ($_REQUEST['ajax']) {
 
 		// Callback function called by refresh system when data is retrieved
 		function interfaces_callback(s) {
-			$('#ifaces_status_<?=$widgetkey?>').html(s);
+			$(<?=json_encode('#ifaces_status_' . $widgetkey)?>).html(s);
 		}
 
 		// POST data to send via AJAX
 		var postdata = {
-			widgetkey :"<?=$widgetkey?>",
+			widgetkey :<?=json_encode($widgetkey)?>,
 			ajax: "ajax"
 		};
 

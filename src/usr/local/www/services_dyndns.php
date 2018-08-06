@@ -3,7 +3,7 @@
  * services_dyndns.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -27,6 +27,10 @@
 ##|-PRIV
 
 require_once("guiconfig.inc");
+
+if(!is_array($config['dyndnses'])){
+	$config['dyndnses'] = array();
+}
 
 if (!is_array($config['dyndnses']['dyndns'])) {
 	$config['dyndnses']['dyndns'] = array();

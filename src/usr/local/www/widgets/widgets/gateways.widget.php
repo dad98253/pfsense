@@ -4,7 +4,7 @@
  *
  * part of pfSense (https://www.pfsense.org)
  * Copyright (c) 2008 Seth Mos
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally part of m0n0wall (http://m0n0.ch/wall)
@@ -23,8 +23,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-$nocsrf = true;
 
 require_once("guiconfig.inc");
 require_once("pfsense-utils.inc");
@@ -213,7 +211,7 @@ $widgetkey_nodash = str_replace("-", "", $widgetkey);
 				<th><?=gettext("Status")?></th>
 			</tr>
 		</thead>
-		<tbody id="<?=$widgetkey?>-gwtblbody">
+		<tbody id="<?=htmlspecialchars($widgetkey)?>-gwtblbody">
 <?php
 		print(compose_table_body_contents($widgetkey));
 ?>
@@ -226,7 +224,7 @@ $widgetkey_nodash = str_replace("-", "", $widgetkey);
 	<?=gen_customwidgettitle_div($widgetconfig['title']); ?>
 	<div class="form-group">
 		<label class="col-sm-4 control-label"><?=gettext('Display')?></label>
-		<?php
+<?php
 			$display_type_gw_ip = "checked";
 			$display_type_monitor_ip = "";
 			$display_type_both_ip = "";
@@ -249,13 +247,13 @@ $widgetkey_nodash = str_replace("-", "", $widgetkey);
 ?>
 		<div class="col-sm-6">
 			<div class="radio">
-				<label><input name="display_type" type="radio" id="display_type_gw_ip" value="gw_ip" <?=$display_type_gw_ip;?> onchange="updateGatewayDisplays();" /> <?=gettext('Gateway IP')?></label>
+				<label><input name="display_type" type="radio" id="display_type_gw_ip" value="gw_ip" <?=$display_type_gw_ip;?> /> <?=gettext('Gateway IP')?></label>
 			</div>
 			<div class="radio">
-				<label><input name="display_type" type="radio" id="display_type_monitor_ip" value="monitor_ip" <?=$display_type_monitor_ip;?> onchange="updateGatewayDisplays();" /><?=gettext('Monitor IP')?></label>
+				<label><input name="display_type" type="radio" id="display_type_monitor_ip" value="monitor_ip" <?=$display_type_monitor_ip;?> /><?=gettext('Monitor IP')?></label>
 			</div>
 			<div class="radio">
-				<label><input name="display_type" type="radio" id="display_type_both_ip" value="both_ip" <?=$display_type_both_ip;?> onchange="updateGatewayDisplays();" /><?=gettext('Both')?></label>
+				<label><input name="display_type" type="radio" id="display_type_both_ip" value="both_ip" <?=$display_type_both_ip;?> /><?=gettext('Both')?></label>
 			</div>
 		</div>
 	</div>
@@ -264,7 +262,7 @@ $widgetkey_nodash = str_replace("-", "", $widgetkey);
 
     <div class="panel panel-default col-sm-10">
 		<div class="panel-body">
-			<input type="hidden" name="widgetkey" value="<?=$widgetkey; ?>">
+			<input type="hidden" name="widgetkey" value="<?=htmlspecialchars($widgetkey); ?>">
 			<div class="table responsive">
 				<table class="table table-striped table-hover table-condensed">
 					<thead>
@@ -310,13 +308,13 @@ events.push(function(){
 
 	// Callback function called by refresh system when data is retrieved
 	function gateways_callback(s) {
-		$('#<?=$widgetkey?>-gwtblbody').html(s);
+		$(<?= json_encode('#' . $widgetkey . '-gwtblbody')?>).html(s);
 	}
 
 	// POST data to send via AJAX
 	var postdata = {
 		ajax: "ajax",
-	 	widgetkey : "<?=$widgetkey?>"
+		widgetkey : <?=json_encode($widgetkey)?>
 	 };
 
 	// Create an object defining the widget refresh AJAX call

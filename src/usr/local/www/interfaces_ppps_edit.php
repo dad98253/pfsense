@@ -3,7 +3,7 @@
  * interfaces_ppps_edit.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2010 Gabriel B. <gnoahb@gmail.com>
  * All rights reserved.
  *
@@ -39,6 +39,10 @@ define("CRON_WEEKLY_PATTERN", "0 0 * * 0");
 define("CRON_DAILY_PATTERN", "0 0 * * *");
 define("CRON_HOURLY_PATTERN", "0 * * * *");
 
+if (!is_array($config['ppps'])) {
+	$config['ppps'] = array();
+}
+
 if (!is_array($config['ppps']['ppp'])) {
 	$config['ppps']['ppp'] = array();
 }
@@ -46,8 +50,6 @@ if (!is_array($config['ppps']['ppp'])) {
 $a_ppps = &$config['ppps']['ppp'];
 
 $iflist = get_configured_interface_with_descr();
-$portlist = get_interface_list();
-$portlist = array_merge($portlist, $iflist);
 
 if (isset($_REQUEST['type'])) {
 	$pconfig['type'] = $_REQUEST['type'];
@@ -97,6 +99,12 @@ if (isset($id) && $a_ppps[$id]) {
 	}
 	if (isset($a_ppps[$id]['protocomp'])) {
 		$pconfig['protocomp'] = true;
+	}
+	if (isset($a_ppps[$id]['pppoe-multilink-over-singlelink'])) {
+		$pconfig['pppoe-multilink-over-singlelink'] = true;
+	}
+	if (isset($a_ppps[$id]['mtu-override'])) {
+		$pconfig['mtu-override'] = true;
 	}
 	if (isset($a_ppps[$id]['vjcomp'])) {
 		$pconfig['vjcomp'] = true;
@@ -409,6 +417,10 @@ if ($_POST['save']) {
 		$ppp['shortseq'] = $_POST['shortseq'] ? true : false;
 		$ppp['acfcomp'] = $_POST['acfcomp'] ? true : false;
 		$ppp['protocomp'] = $_POST['protocomp'] ? true : false;
+		$ppp['pppoe-multilink-over-singlelink'] =
+		    $_POST['pppoe-multilink-over-singlelink'] ? true : false;
+		$ppp['mtu-override'] =
+		    $_POST['mtu-override'] ? true : false;
 		$ppp['vjcomp'] = $_POST['vjcomp'] ? true : false;
 		$ppp['tcpmssfix'] = $_POST['tcpmssfix'] ? true : false;
 		if (is_array($port_data['bandwidth'])) {
@@ -478,77 +490,6 @@ function build_country_list() {
 	return($list);
 }
 
-function build_link_list() {
-	global $config, $pconfig;
-
-	$linklist = array('list' => array(), 'selected' => array());
-
-	$selected_ports = array();
-
-	if (is_array($pconfig['interfaces'])) {
-		$selected_ports = $pconfig['interfaces'];
-	} elseif (!empty($pconfig['interfaces'])) {
-		$selected_ports = explode(',', $pconfig['interfaces']);
-	}
-
-	if (!is_dir("/var/spool/lock")) {
-		mwexec("/bin/mkdir -p /var/spool/lock");
-	}
-
-	if ($pconfig['type'] == 'ppp') {
-		$serialports = glob("/dev/cua[a-zA-Z][0-9]{,.[0-9],.[0-9][0-9],[0-9],[0-9].[0-9],[0-9].[0-9][0-9]}", GLOB_BRACE);
-		$serport_count = 0;
-
-		foreach ($serialports as $port) {
-			$serport_count++;
-
-			$linklist['list'][$port] = trim($port);
-
-			if (in_array($port, $selected_ports)) {
-				array_push($linklist['selected'], $port);
-			}
-		}
-	} else {
-		$port_count = 0;
-		$portlist = get_interface_list();
-		if (is_array($config['vlans']['vlan']) && count($config['vlans']['vlan'])) {
-			foreach ($config['vlans']['vlan'] as $vlan) {
-				$portlist[$vlan['vlanif']] = $vlan;
-			}
-		}
-		foreach ($portlist as $ifn => $ifinfo) {
-			$port_count++;
-			$string = "";
-
-			if (is_array($ifinfo)) {
-				$string .= $ifn;
-				if ($ifinfo['mac']) {
-					$string .= " ({$ifinfo['mac']})";
-				}
-				if ($ifinfo['friendly']) {
-					$string .= " - " . convert_friendly_interface_to_friendly_descr($ifinfo['friendly']);
-				} elseif ($ifinfo['descr']) {
-					$string .= " - {$ifinfo['descr']}";
-				}
-			} else {
-				$string .= $ifinfo;
-			}
-
-			$linklist['list'][$ifn] = $string;
-
-			if (in_array($ifn, $selected_ports)) {
-				array_push($linklist['selected'], $ifn);
-			}
-		}
-
-		if ($serport_count > $port_count) {
-			$port_count = $serport_count;
-		}
-	}
-
-	return($linklist);
-}
-
 if ($input_errors) {
 	print_input_errors($input_errors);
 }
@@ -569,7 +510,7 @@ $section->addInput(new Form_Select(
 	$types
 ));
 
-$linklist = build_link_list();
+$linklist = build_ppps_link_list();
 
 $section->addInput(new Form_Select(
 	'interfaces',
@@ -896,6 +837,20 @@ $section->addInput(new Form_Checkbox(
 	$pconfig['protocomp']
 ))->setHelp('Protocol field compression. This option saves one byte per frame for most frames.');
 
+$section->addInput(new Form_Checkbox(
+	'pppoe-multilink-over-singlelink',
+	'Multilink over single link',
+	'Multilink extensions over single link',
+	$pconfig['pppoe-multilink-over-singlelink']
+))->setHelp('Enable if the provider supports LCP multilink extensions over single link (will ignore MTU / MRU settings)');
+
+$section->addInput(new Form_Checkbox(
+	'mtu-override',
+	'Force MTU',
+	'Force MTU value to a known higher value',
+	$pconfig['mtu-override']
+))->setHelp('Overwrite the result of LCP negotiation with a known working higher value. WARNING: This option violates RFC 1661 and can break connectivity.');
+
 // Display the Link parameters. We will hide this by default, then un-hide the selected ones on clicking 'Advanced'
 $j = 0;
 foreach ($linklist['list'] as $ifnm => $nm) {
@@ -933,7 +888,7 @@ foreach ($linklist['list'] as $ifnm => $nm) {
 	$j++;
 
 	$section->add($group);
-	$group->addClass('localip sec-advanced')->addClass('linkparam' . $ifnm);
+	$group->addClass('localip sec-advanced')->addClass('linkparam' . str_replace('.', '_', $ifnm));
 }
 
 $linkparamhelp = new Form_StaticText(
@@ -1009,6 +964,8 @@ events.push(function() {
 			    (!$pconfig['tcpmssfix']) &&
 			    (!$pconfig['shortseq']) &&
 			    (!$pconfig['acfcomp']) &&
+			    (!$pconfig['pppoe-multilink-over-singlelink']) &&
+			    (!$pconfig['mtu-override']) &&
 			    (!$pconfig['protocomp'])) {
 				$showadv = false;
 			} else {
@@ -1040,6 +997,8 @@ events.push(function() {
 		hideClass('pppoe', !pppoetype);
 		hideResetDisplay(!(showadvopts && pppoetype));
 		hideInput('pppoe-reset-type', !(showadvopts && pppoetype));
+		hideCheckbox('pppoe-multilink-over-singlelink', !(showadvopts && pppoetype));
+		hideCheckbox('mtu-override', !(showadvopts && pppoetype));
 
 		hideInterfaces();
 
@@ -1048,6 +1007,7 @@ events.push(function() {
 		} else {
 			text = "<?=gettext('Display Advanced');?>";
 		}
+
 		$('#btnadvopts').html('<i class="fa fa-cog"></i> ' + text);
 	} // e-o-show_advopts
 
@@ -1080,11 +1040,12 @@ events.push(function() {
 		<?php if ($pconfig['type'] != 'ppp') : ?>
 		var selected = $(".interfaces").val();
 		var length = $(".interfaces :selected").length;
+
 		for (var i=0; i<length; i++) {
 			hideClass('localip' + selected[i], false);
 
 			if (showadvopts) {
-				hideClass('linkparam' + selected[i], false);
+				hideClass('linkparam' + selected[i].replace(".", "_"), false);
 				hideInput('linkparamhelp', false);
 			}
 		}

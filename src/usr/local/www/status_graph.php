@@ -3,7 +3,7 @@
  * status_graph.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -52,6 +52,8 @@ foreach (array('server', 'client') as $mode) {
 	}
 }
 
+$ifdescrs = array_merge($ifdescrs, interface_ipsec_vti_list_all());
+
 if ($_REQUEST['if']) {
 	$curif = $_REQUEST['if'];
 	$found = false;
@@ -94,6 +96,16 @@ if ($_REQUEST['backgroundupdate']) {
 } else {
 	$curbackgroundupdate = "";
 }
+if (isset($_REQUEST['smoothfactor'])){
+	$cursmoothing = $_REQUEST['smoothfactor'];
+} else {
+	$cursmothing = 0;
+}
+if ($_REQUEST['invert']){
+	$curinvert = $_REQUEST['invert'];
+} else {
+	$curinvert = "";
+}
 
 function iflist() {
 	global $ifdescrs;
@@ -116,7 +128,7 @@ $form->addClass('auto-submit');
 
 $section = new Form_Section('Graph Settings');
 
-$group = new Form_Group('');
+$group = new Form_Group('Traffic Graph');
 
 $group->add(new Form_Select(
 	'if',
@@ -158,7 +170,11 @@ $group->add(new Form_Select(
 	)
 ))->setHelp('Display');
 
-$group->add(new Form_Select(
+$section->add($group);
+
+$group2 = new Form_Group('Controls');
+
+$group2->add(new Form_Select(
 	'backgroundupdate',
 	null,
 	$curbackgroundupdate,
@@ -168,7 +184,30 @@ $group->add(new Form_Select(
 	)
 ))->setHelp('Background updates');
 
-$section->add($group);
+$group2->add(new Form_Select(
+	'invert',
+	null,
+	$curinvert,
+	array (
+		'true'	=> gettext('On'),
+		'false'	=> gettext('Off'),
+	)
+))->setHelp('Invert in/out');
+
+$group2->add(new Form_Input(
+	'smoothfactor',
+	null,
+	'range',
+	$cursmoothing,
+	array (
+		'min' => 0,
+		'max' => 5,
+		'step' => 1
+		)
+
+))->setHelp('Graph Smoothing');
+
+$section->add($group2);
 
 $form->add($section);
 print $form;
@@ -191,9 +230,9 @@ events.push(function() {
 	var InterfaceString = "<?=$curif?>";
 	var RealInterfaceString = "<?=$realif?>";
     window.graph_backgroundupdate = $('#backgroundupdate').val() === "true";
-
+	window.smoothing = $('#smoothfactor').val();
 	window.interval = 1;
-	window.invert = "true";
+	window.invert = $('#invert').val() === "true";
 	window.size = 8;
 	window.interfaces = InterfaceString.split("|").filter(function(entry) { return entry.trim() != ''; });
 	window.realinterfaces = RealInterfaceString.split("|").filter(function(entry) { return entry.trim() != ''; });

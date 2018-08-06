@@ -3,7 +3,7 @@
  * services_igmpproxy_edit.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -34,6 +34,10 @@ $pgtitle = array(gettext("Services"), gettext("IGMP Proxy"), gettext("Edit"));
 $pglinks = array("", "services_igmpproxy.php", "@self");
 
 require_once("guiconfig.inc");
+
+if (!is_array($config['igmpproxy'])) {
+	$config['igmpproxy'] = array();
+}
 
 if (!is_array($config['igmpproxy']['igmpentry'])) {
 	$config['igmpproxy']['igmpentry'] = array();

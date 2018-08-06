@@ -3,7 +3,7 @@
  * openvpn.widget.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,8 +18,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-$nocsrf = true;
 
 require_once("guiconfig.inc");
 require_once("openvpn.inc");
@@ -325,7 +323,7 @@ $widgetkey_nodash = str_replace("-", "", $widgetkey);
 
 ?>
 
-<div id="<?=$widgetkey?>-openvpn-mainpanel" class="content">
+<div id="<?=htmlspecialchars($widgetkey)?>-openvpn-mainpanel" class="content">
 
 <?php
 	printPanel($widgetkey);
@@ -338,7 +336,7 @@ $widgetkey_nodash = str_replace("-", "", $widgetkey);
 	<?=gen_customwidgettitle_div($widgetconfig['title']); ?>
     <div class="panel panel-default col-sm-10">
 		<div class="panel-body">
-			<input type="hidden" name="widgetkey" value="<?=$widgetkey; ?>">
+			<input type="hidden" name="widgetkey" value="<?=htmlspecialchars($widgetkey); ?>">
 			<div class="table responsive">
 				<table class="table table-striped table-hover table-condensed">
 					<thead>
@@ -406,7 +404,7 @@ $widgetkey_nodash = str_replace("-", "", $widgetkey);
 	function killComplete(req) {
 		var values = req.responseText.split("|");
 		if (values[3] != "0") {
-			alert('<?=gettext("An error occurred.");?>' + ' (' + values[3] + ')');
+	//		alert('<?=gettext("An error occurred.");?>' + ' (' + values[3] + ')');
 			return;
 		}
 
@@ -422,13 +420,13 @@ $widgetkey_nodash = str_replace("-", "", $widgetkey);
 
 		// Callback function called by refresh system when data is retrieved
 		function openvpn_callback(s) {
-			$('#<?=$widgetkey?>-openvpn-mainpanel').html(s);
+			$(<?=json_encode('#' . $widgetkey . '-openvpn-mainpanel')?>).html(s);
 		}
 
 		// POST data to send via AJAX
 		var postdata = {
 			ajax: "ajax",
-		 	widgetkey: "<?=$widgetkey?>"
+			widgetkey: <?=json_encode($widgetkey)?>
 		 };
 
 		// Create an object defining the widget refresh AJAX call

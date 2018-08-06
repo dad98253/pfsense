@@ -3,7 +3,7 @@
  * system_advanced_misc.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2008 Shrew Soft Inc
  * All rights reserved.
  *
@@ -45,10 +45,10 @@ $pconfig['proxypass'] = $config['system']['proxypass'];
 $pconfig['harddiskstandby'] = $config['system']['harddiskstandby'];
 $pconfig['lb_use_sticky'] = isset($config['system']['lb_use_sticky']);
 $pconfig['srctrack'] = $config['system']['srctrack'];
-$pconfig['gw_switch_default'] = isset($config['system']['gw_switch_default']);
 $pconfig['powerd_enable'] = isset($config['system']['powerd_enable']);
 $pconfig['crypto_hardware'] = $config['system']['crypto_hardware'];
 $pconfig['thermal_hardware'] = $config['system']['thermal_hardware'];
+$pconfig['pti_disabled'] = isset($config['system']['pti_disabled']);
 $pconfig['schedule_states'] = isset($config['system']['schedule_states']);
 $pconfig['gw_down_kill_states'] = isset($config['system']['gw_down_kill_states']);
 $pconfig['skip_rules_gw_down'] = isset($config['system']['skip_rules_gw_down']);
@@ -56,6 +56,9 @@ $pconfig['use_mfs_tmpvar'] = isset($config['system']['use_mfs_tmpvar']);
 $pconfig['use_mfs_tmp_size'] = $config['system']['use_mfs_tmp_size'];
 $pconfig['use_mfs_var_size'] = $config['system']['use_mfs_var_size'];
 $pconfig['do_not_send_uniqueid'] = isset($config['system']['do_not_send_uniqueid']);
+
+$use_mfs_tmpvar_before = isset($config['system']['use_mfs_tmpvar']) ? true : false;
+$use_mfs_tmpvar_after = $use_mfs_tmpvar_before;
 
 $pconfig['powerd_ac_mode'] = "hadp";
 if (!empty($config['system']['powerd_ac_mode'])) {
@@ -74,7 +77,8 @@ if (!empty($config['system']['powerd_normal_mode'])) {
 
 $crypto_modules = array(
 	'aesni' => gettext("AES-NI CPU-based Acceleration"),
-	'cryptodev' => gettext("BSD Crypto Device (cryptodev)")
+	'cryptodev' => gettext("BSD Crypto Device (cryptodev)"),
+	'aesni_cryptodev' => gettext("AES-NI and BSD Crypto Device (aesni, cryptodev)"),
 );
 
 $thermal_hardware_modules = array(
@@ -172,12 +176,6 @@ if ($_POST) {
 			}
 		}
 
-		if ($_POST['gw_switch_default'] == "yes") {
-			$config['system']['gw_switch_default'] = true;
-		} else {
-			unset($config['system']['gw_switch_default']);
-		}
-
 		if ($_POST['pkg_nochecksig'] == "yes") {
 			$config['system']['pkg_nochecksig'] = true;
 		} elseif (isset($config['system']['pkg_nochecksig'])) {
@@ -212,6 +210,13 @@ if ($_POST) {
 			unset($config['system']['thermal_hardware']);
 		}
 
+		$old_pti_state = isset($config['system']['pti_disabled']);
+		if ($_POST['pti_disabled'] == "yes") {
+			$config['system']['pti_disabled'] = true;
+		} else {
+			unset($config['system']['pti_disabled']);
+		}
+
 		if ($_POST['schedule_states'] == "yes") {
 			$config['system']['schedule_states'] = true;
 		} else {
@@ -232,8 +237,10 @@ if ($_POST) {
 
 		if ($_POST['use_mfs_tmpvar'] == "yes") {
 			$config['system']['use_mfs_tmpvar'] = true;
+			$use_mfs_tmpvar_after = true;
 		} else {
 			unset($config['system']['use_mfs_tmpvar']);
+			$use_mfs_tmpvar_after = false;
 		}
 
 		$config['system']['use_mfs_tmp_size'] = $_POST['use_mfs_tmp_size'];
@@ -283,6 +290,9 @@ if ($_POST) {
 		system_resolvconf_generate(true);
 		$retval |= filter_configure();
 
+		if ($old_pti_state != isset($config['system']['pti_disabled'])) {
+			setup_loader_settings();
+		}
 		activate_powerd();
 		load_crypto();
 		load_thermal_hardware();
@@ -298,7 +308,6 @@ include("head.inc");
 
 if ($input_errors) {
 	print_input_errors($input_errors);
-	unset($pconfig['doreboot']);
 }
 
 if ($changes_applied) {
@@ -377,15 +386,6 @@ $group->add(new Form_Input(
 	'to persist for longer periods of time.');
 
 $section->add($group);
-
-$section->addInput(new Form_Checkbox(
-	'gw_switch_default',
-	'Default gateway switching',
-	'Enable default gateway switching',
-	$pconfig['gw_switch_default']
-))->setHelp('If the default gateway goes down, switch the default gateway to '.
-	'another available one. This is not enabled by default, as it\'s unnecessary in '.
-	'most all scenarios, which instead use gateway groups.');
 
 $form->add($section);
 $section = new Form_Section('Power Savings');
@@ -466,6 +466,17 @@ $section->addInput(new Form_Select(
 	'"none" and then reboot.');
 
 $form->add($section);
+$pti = get_single_sysctl('vm.pmap.pti');
+if (strlen($pti) > 0) {
+	$section = new Form_Section('Kernel Page Table Isolation');
+	$section->addInput(new Form_Checkbox(
+		'pti_disabled',
+		'Kernel PTI',
+		'Disable the kernel PTI',
+		$pconfig['pti_disabled']
+	))->setHelp('Meltdown workaround.  If disabled the kernel memory can be accessed by unprivileged users on affected CPUs.');
+	$form->add($section);
+}
 $section = new Form_Section('Schedules');
 
 $section->addInput(new Form_Checkbox(
@@ -594,31 +605,16 @@ $form->add($section);
 
 print $form;
 
-$ramdisk_msg = gettext('The \"Use Ramdisk\" setting has been changed. This will cause the firewall\nto reboot immediately after the new setting is saved.\n\nPlease confirm.');?>
+$ramdisk_msg = gettext('The \"Use Ramdisk\" setting has been changed. This requires the firewall\nto reboot.\n\nReboot now ?');
+$use_mfs_tmpvar_changed = (($use_mfs_tmpvar_before !== $use_mfs_tmpvar_after) && !$input_errors);
+?>
 
 <script type="text/javascript">
 //<![CDATA[
 events.push(function() {
-	// Record the state of the Use Ramdisk checkbox on page load
-	use_ramdisk = $('#use_mfs_tmpvar').prop('checked');
-
-	$('form').submit(function(event) {
-		// Has the Use ramdisk checkbox changed state?
-		if ($('#use_mfs_tmpvar').prop('checked') != use_ramdisk) {
-			if (confirm("<?=$ramdisk_msg?>")) {
-				$('form').append('<input type="hidden" name="doreboot" id="doreboot" value="yes"/>');
-			} else {
-				event.preventDefault();
-			}
-		}
-	});
-
-	drb = "<?=$pconfig['doreboot']?>";
-
-	if (drb == "yes") {
-		$('form').append("<input type=\"hidden\" name=\"override\" value=\"yes\" />");
-		$('form').get(0).setAttribute('action', 'diag_reboot.php');
-		$(form).submit();
+	// Has the Use ramdisk checkbox changed state?
+	if (<?=(int)$use_mfs_tmpvar_changed?> && confirm("<?=$ramdisk_msg?>")) {
+		postSubmit({override : 'yes'}, 'diag_reboot.php')
 	}
 
 	// source track timeout field is disabled if sticky connections not enabled

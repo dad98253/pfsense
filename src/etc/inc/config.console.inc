@@ -3,7 +3,7 @@
  * config.console.inc
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally part of m0n0wall (http://m0n0.ch/wall)
@@ -28,6 +28,13 @@ require_once("globals.inc");
 require_once("interfaces.inc");
 require_once("util.inc");
 
+/*
+ * returns:
+ * -2: error
+ * -1: no interface found
+ *  0: interface(s) assigned
+ *  1: user quit
+ */
 function set_networking_interfaces_ports() {
 	global $noreboot;
 	global $config;
@@ -64,12 +71,12 @@ EOD;
 
 	if (!is_array($iflist)) {
 		echo gettext("No interfaces found!") . "\n";
-		$iflist = array();
+		return (-1);
 	} else {
 		// ifsmallist is kept with spaces at the beginning and end to assist with str_replace() operations
 		$ifsmallist = " ";
 		foreach ($iflist as $iface => $ifa) {
-			$friendly = convert_real_interface_to_friendly_interface_name($iface);	
+			$friendly = convert_real_interface_to_friendly_interface_name($iface);
 			$ifstatus = pfSense_get_interface_addresses($config['interfaces'][$friendly]['if']);
 			if (is_array($ifstatus) && $ifstatus['linkstateup'])
 				$status = "  (up)";
@@ -77,7 +84,7 @@ EOD;
 				$status = "(down)";
 			$ifsmallist = $ifsmallist . $iface. " ";
 			echo sprintf("%-7s %s %s %s\n", $iface, $ifa['mac'],
-				$status, substr($ifa['dmesg'], 0, 48));
+				$status, substr($ifa['dmesg'], 0, 46));
 		}
 	}
 
@@ -101,11 +108,11 @@ EOD;
 		echo "\n\n" . gettext("VLAN interfaces:") . "\n\n";
 		foreach ($config['vlans']['vlan'] as $vlan) {
 
-			echo sprintf("% -16s%s\n", "{$vlan['if']}_vlan{$vlan['tag']}",
+			echo sprintf("% -16s%s\n", vlan_interface($vlan),
 				"VLAN tag {$vlan['tag']}, parent interface {$vlan['if']}");
 
-			$iflist[$vlan['if'] . '_vlan' . $vlan['tag']] = array();
-			$ifsmallist = $ifsmallist . $vlan['if'] . '_vlan' . $vlan['tag'] . " ";
+			$iflist[vlan_interface($vlan)] = array();
+			$ifsmallist = $ifsmallist . vlan_interface($vlan) . " ";
 		}
 	}
 
@@ -122,7 +129,7 @@ EOD;
 		printf(gettext('%1$s(%2$s or a): '), "\n", trim($ifsmallist));
 		$wanif = chop(fgets($fp));
 		if ($wanif === "") {
-			return;
+			return (1);
 		}
 		if ($wanif === "a") {
 			$wanif = autodetect_interface("WAN", $fp);
@@ -165,8 +172,8 @@ EOD;
 	$optif = array();
 
 	if ($lanif <> "") {
-		while (1) {
-			if ($optif[$i]) {
+		while (strlen(trim($ifsmallist)) > 0) {
+			if (!empty($optif[$i])) {
 				$i++;
 			}
 			$io = $i + 1;
@@ -213,7 +220,7 @@ Error: The same interface name cannot be assigned twice!
 
 EOD;
 				fclose($fp);
-				return;
+				return (-2);
 			}
 		}
 	}
@@ -286,6 +293,9 @@ EOD;
 			}
 			if (isset($config['dhcpd']['lan'])) {
 				unset($config['dhcpd']['lan']);
+			}
+			if (isset($config['dhcpdv6']['lan'])) {
+				unset($config['dhcpdv6']['lan']);
 			}
 			if (isset($config['interfaces']['lan']['if'])) {
 				unset($config['interfaces']['lan']['if']);
@@ -373,19 +383,17 @@ EOD;
 
 		fclose($fp);
 
-		if (platform_booting()) {
-			return;
-		}
-
 		echo gettext("One moment while the settings are reloading...");
-		echo gettext(" done!") . "\n";
-
 		touch("{$g['tmp_path']}/assign_complete");
 
-		if (file_exists("/conf/trigger_initial_wizard")) {
+		if (file_exists("{$g['conf_path']}/trigger_initial_wizard")) {
 			// Let the system know that the interface assign part of initial setup has been done.
 			touch("{$g['conf_path']}/assign_complete");
 		}
+
+		echo gettext(" done!") . "\n";
+
+		return (0);
 	}
 }
 
@@ -463,7 +471,7 @@ function vlan_setup() {
 		$vlan['if'] = chop(fgets($fp));
 
 		if ($vlan['if']) {
-			if (!array_key_exists($vlan['if'], $iflist) || 
+			if (!array_key_exists($vlan['if'], $iflist) ||
 			    !is_jumbo_capable($vlan['if'])) {
 				printf(gettext('%1$sInvalid interface name \'%2$s\'%3$s'), "\n", $vlan['if'], "\n");
 				continue;
@@ -474,7 +482,7 @@ function vlan_setup() {
 
 		echo gettext("Enter the VLAN tag (1-4094):") . " ";
 		$vlan['tag'] = chop(fgets($fp));
-		$vlan['vlanif'] = "{$vlan['if']}_vlan{$vlan['tag']}";
+		$vlan['vlanif'] = vlan_interface($vlan);
 		if (!is_numericint($vlan['tag']) || ($vlan['tag'] < 1) || ($vlan['tag'] > 4094)) {
 			printf(gettext('%1$sInvalid VLAN tag \'%2$s\'%3$s'), "\n", $vlan['tag'], "\n");
 			continue;

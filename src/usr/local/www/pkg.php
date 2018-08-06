@@ -3,7 +3,7 @@
  * pkg.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -190,9 +190,6 @@ if ($pkg['tabs'] != "") {
 		} else {
 			$active = false;
 		}
-		if (isset($tab['no_drop_down'])) {
-			$no_drop_down = true;
-		}
 		$urltmp = "";
 		if ($tab['url'] != "") {
 			$urltmp = $tab['url'];
@@ -225,7 +222,7 @@ if ($pkg['tabs'] != "") {
 include("head.inc");
 if (isset($tab_array)) {
 	foreach ($tab_array as $tabid => $tab) {
-		display_top_tabs($tab); //, $no_drop_down, $tabid);
+		display_top_tabs($tab);
 	}
 }
 
@@ -411,7 +408,7 @@ if ($savemsg) {
 <?php
 	$i = 0;
 	$pagination_counter = 0;
-	if ($evaledvar) {
+	if ($evaledvar && is_array($evaledvar)) {
 		foreach ($evaledvar as $ip) {
 			if ($startdisplayingat) {
 				if ($i < $startdisplayingat) {

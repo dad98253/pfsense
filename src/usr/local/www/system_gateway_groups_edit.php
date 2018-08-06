@@ -3,7 +3,7 @@
  * system_gateway_groups_edit.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2010 Seth Mos <seth.mos@dds.nl>
  * All rights reserved.
  *
@@ -31,6 +31,9 @@ require_once("guiconfig.inc");
 require_once("ipsec.inc");
 require_once("vpn.inc");
 
+if (!is_array($config['gateways'])) {
+	$config['gateways'] = array();
+}
 if (!is_array($config['gateways']['gateway_group'])) {
 	$config['gateways']['gateway_group'] = array();
 }
@@ -322,12 +325,7 @@ $section->addInput(new Form_Select(
 	'trigger',
 	'*Trigger Level',
 	$pconfig['trigger'],
-	array(
-		'0' => gettext('Member down'),
-		'1' => gettext('Packet Loss'),
-		'2' => gettext('High Latency'),
-		'3' => gettext('Packet Loss or High latency')
-	)
+	$categories
 ))->setHelp('When to trigger exclusion of a member');
 
 $section->addInput(new Form_Input(

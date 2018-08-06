@@ -3,7 +3,7 @@
  * vpn_ipsec_mobile.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2008 Shrew Soft Inc
  * All rights reserved.
  *
@@ -36,6 +36,10 @@ require_once("guiconfig.inc");
 require_once("ipsec.inc");
 require_once("vpn.inc");
 require_once("filter.inc");
+
+if (!is_array($config['ipsec'])) {
+	$config['ipsec'] = array();
+}
 
 if (!is_array($config['ipsec']['phase1'])) {
 	$config['ipsec']['phase1'] = array();
@@ -240,10 +244,11 @@ if ($_POST['save']) {
 		if ($pconfig['enable']) {
 			$client['enable'] = true;
 		}
-
 		if (!empty($pconfig['user_source'])) {
 			$client['user_source'] = implode(",", $pconfig['user_source']);
+			$client['user_source'] = htmlentities($client['user_source'],ENT_COMPAT,'UTF-8');
 		}
+
 		$client['group_source'] = $pconfig['group_source'];
 
 		if ($pconfig['pool_enable']) {
@@ -291,7 +296,6 @@ if ($_POST['save']) {
 		if ($pconfig['login_banner_enable']) {
 			$client['login_banner'] = $pconfig['login_banner'];
 		}
-
 		$a_client = $client;
 
 		write_config(gettext("Saved IPsec Mobile Clients configuration."));
@@ -442,8 +446,8 @@ $section = new Form_Section('Extended Authentication (Xauth)');
 
 $authServers = array();
 
-foreach (auth_get_authserver_list() as $authServer) {
-	$authServers[$authServer['name']] = $authServer['name']; // Value == name
+foreach (auth_get_authserver_list() as $key => $authServer) {
+	$authServers[$key] = $authServer['name']; // Value == name
 }
 
 $section->addInput(new Form_Select(
@@ -672,7 +676,7 @@ $group->add(new Form_Select(
 	'Group',
 	$pconfig['pfs_group'],
 	$p2_pfskeygroups
-))->setWidth(2);
+))->setHelp('Note: Groups 1, 2, 22, 23, and 24 provide weak security and should be avoided.');
 
 $section->add($group);
 

@@ -3,7 +3,7 @@
  * pkg_edit.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -82,6 +82,10 @@ if ($pkg['custom_php_global_functions'] != "") {
 }
 
 // grab the installedpackages->package_name section.
+if ($config['installedpackages'] && !is_array($config['installedpackages'][xml_safe_fieldname($pkg['name'])])) {
+	$config['installedpackages'][xml_safe_fieldname($pkg['name'])] = array();
+}
+
 if ($config['installedpackages'] && !is_array($config['installedpackages'][xml_safe_fieldname($pkg['name'])]['config'])) {
 	$config['installedpackages'][xml_safe_fieldname($pkg['name'])]['config'] = array();
 }
@@ -552,10 +556,6 @@ if ($pkg['tabs'] != "") {
 			$active = false;
 		}
 
-		if (isset($tab['no_drop_down'])) {
-			$no_drop_down = true;
-		}
-
 		$urltmp = "";
 		if ($tab['url'] != "") {
 			$urltmp = $tab['url'];
@@ -594,7 +594,7 @@ if ($pkg['custom_php_after_head_command']) {
 }
 if (isset($tab_array)) {
 	foreach ($tab_array as $tabid => $tab) {
-		display_top_tabs($tab); //, $no_drop_down, $tabid);
+		display_top_tabs($tab);
 	}
 }
 
@@ -908,8 +908,11 @@ foreach ($pkg['fields']['field'] as $pkga) {
 			$onchange = (isset($pkga['onchange']) ? "{$pkga['onchange']}" : '');
 
 			$source_url = $pkga['source'];
-			eval("\$pkg_source_txt = &$source_url;");
-
+			try{
+				@eval("\$pkg_source_txt = &$source_url;");
+			} catch (\Throwable | \Error | \Exception $e) {
+				//do nothing
+			}
 			#check if show disable option is present on xml
 			if (!is_array($pkg_source_txt)) {
 				$pkg_source_txt = array();
@@ -1098,6 +1101,11 @@ foreach ($pkg['fields']['field'] as $pkga) {
 			// Use xml tag <typealiases> to filter type aliases
 			$size = ($pkga['size'] ? "size=\"{$pkga['size']}\"" : '');
 			$fieldname = $pkga['fieldname'];
+
+			if (!is_array($config['aliases'])) {
+				$config['aliases'] = array();
+			}
+			
 			$a_aliases = &$config['aliases']['alias'];
 			$addrisfirst = 0;
 			$aliasesaddr = "";

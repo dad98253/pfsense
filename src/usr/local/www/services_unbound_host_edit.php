@@ -3,7 +3,7 @@
  * services_unbound_host_edit.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2014 Warren Baker (warren@decoy.co.za)
  * Copyright (c) 2003-2005 Bob Zoller <bob@kludgebox.com>
  * All rights reserved.
@@ -246,6 +246,9 @@ $form->add($section);
 
 $section = new Form_Section('Additional Names for this Host');
 
+if (!$pconfig['aliases']) {
+	$pconfig['aliases'] = array();
+}
 if (!$pconfig['aliases']['item']) {
 	$pconfig['aliases']['item'] = array('host' => "");
 }

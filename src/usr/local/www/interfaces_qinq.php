@@ -3,7 +3,7 @@
  * interfaces_qinq.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -29,30 +29,21 @@
 require_once("guiconfig.inc");
 require_once("functions.inc");
 
+if (!is_array($config['qinqs'])) {
+	$config['qinqs'] = array();
+}
+
 if (!is_array($config['qinqs']['qinqentry'])) {
 	$config['qinqs']['qinqentry'] = array();
 }
 
 $a_qinqs = &$config['qinqs']['qinqentry'];
 
-function qinq_inuse($num) {
-	global $config, $a_qinqs;
-
-	$iflist = get_configured_interface_list(true);
-	foreach ($iflist as $if) {
-		if ($config['interfaces'][$if]['if'] == $a_qinqs[$num]['qinqif']) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
 if ($_POST['act'] == "del") {
 	$id = $_POST['id'];
 
 	/* check if still in use */
-	if (qinq_inuse($id)) {
+	if (isset($a_qinqs) && vlan_inuse($a_qinqs[$id])) {
 		$input_errors[] = gettext("This QinQ cannot be deleted because it is still being used as an interface.");
 	} elseif (empty($a_qinqs[$id]['vlanif']) || !does_interface_exist($a_qinqs[$id]['vlanif'])) {
 		$input_errors[] = gettext("QinQ interface does not exist");
@@ -60,13 +51,24 @@ if ($_POST['act'] == "del") {
 		$qinq =& $a_qinqs[$id];
 
 		$delmembers = explode(" ", $qinq['members']);
-		if (count($delmembers) > 0) {
-			foreach ($delmembers as $tag) {
-				mwexec("/usr/sbin/ngctl shutdown {$qinq['vlanif']}h{$tag}:");
+		foreach ($delmembers as $tag) {
+			if (qinq_inuse($qinq, $tag)) {
+				$input_errors[] = gettext("This QinQ cannot be deleted because one of it tags is still being used as an interface.");
+				break;
 			}
 		}
-		mwexec("/usr/sbin/ngctl shutdown {$qinq['vlanif']}qinq:");
-		mwexec("/usr/sbin/ngctl shutdown {$qinq['vlanif']}:");
+	}
+
+	if (empty($input_errors)) {
+		$qinq =& $a_qinqs[$id];
+
+		$ngif = str_replace(".", "_", $qinq['vlanif']);
+		$delmembers = explode(" ", $qinq['members']);
+		foreach ($delmembers as $tag) {
+			mwexec("/usr/sbin/ngctl shutdown {$ngif}h{$tag}:  > /dev/null 2>&1");
+		}
+		mwexec("/usr/sbin/ngctl shutdown {$ngif}qinq: > /dev/null 2>&1");
+		mwexec("/usr/sbin/ngctl shutdown {$ngif}: > /dev/null 2>&1");
 		pfSense_interface_destroy($qinq['vlanif']);
 		unset($a_qinqs[$id]);
 

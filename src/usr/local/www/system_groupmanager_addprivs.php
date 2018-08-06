@@ -3,7 +3,7 @@
  * system_groupmanager_addprivs.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2006 Daniel S. Haischt.
  * All rights reserved.
  *
@@ -34,6 +34,9 @@
 
 require_once("guiconfig.inc");
 require_once("pfsense-utils.inc");
+
+$logging_level = LOG_WARNING;
+$logging_prefix = gettext("Local User Database");
 
 $groupid = $_REQUEST['groupid'];
 
@@ -87,7 +90,9 @@ if ($_POST['save']) {
 			}
 		}
 
-		write_config();
+		$savemsg = sprintf(gettext("Privileges changed for group: %s"), $a_group['name']);
+		write_config($savemsg);
+		syslog($logging_level, "{$logging_prefix}: {$savemsg}");
 
 		pfSenseHeader("system_groupmanager.php?act=edit&groupid={$groupid}");
 		exit;

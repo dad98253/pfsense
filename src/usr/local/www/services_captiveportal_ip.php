@@ -3,7 +3,7 @@
  * services_captiveportal_ip.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2004 Dinesh Nair <dinesh@alphaque.com>
  * All rights reserved.
  *
@@ -60,7 +60,7 @@ $pgtitle = array(gettext("Services"), gettext("Captive Portal"), $a_cp[$cpzone][
 $pglinks = array("", "services_captiveportal_zones.php", "services_captiveportal.php?zone=" . $cpzone, "@self");
 $shortcut_section = "captiveportal";
 
-if ($_POST['act'] == "del" && !empty($cpzone) && isset($cpzoneid)) {
+if ($_POST['act'] == "del" && !empty($cpzone)) {
 	$a_allowedips =& $config['captiveportal'][$cpzone]['allowedip'];
 
 	if ($a_allowedips[$_POST['id']]) {

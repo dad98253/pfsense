@@ -3,7 +3,7 @@
  * system_usermanager.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2008 Shrew Soft Inc.
  * Copyright (c) 2005 Paul Taylor <paultaylor@winn-dixie.com>
  * All rights reserved.
@@ -36,6 +36,9 @@
 require_once("certs.inc");
 require_once("guiconfig.inc");
 require_once("pfsense-utils.inc");
+
+$logging_level = LOG_WARNING;
+$logging_prefix = gettext("Local User Database");
 
 // start admin user code
 if (isset($_REQUEST['userid']) && is_numericint($_REQUEST['userid'])) {
@@ -94,8 +97,11 @@ if ($_POST['act'] == "deluser") {
 		local_user_del($a_user[$id]);
 		$userdeleted = $a_user[$id]['name'];
 		unset($a_user[$id]);
-		write_config();
-		$savemsg = sprintf(gettext("User %s successfully deleted."), $userdeleted);
+		/* Reindex the array to avoid operating on an incorrect index https://redmine.pfsense.org/issues/7733 */
+		$a_user = array_values($a_user);
+		$savemsg = sprintf(gettext("Successfully deleted user: %s"), $userdeleted);
+		write_config($savemsg);
+		syslog($logging_level, "{$logging_prefix}: {$savemsg}");
 	}
 
 } else if ($act == "new") {
@@ -123,9 +129,7 @@ if ($_POST['act'] == "deluser") {
 if (isset($_POST['dellall'])) {
 
 	$del_users = $_POST['delete_check'];
-	$deleted_users = "";
-	$deleted_count = 0;
-	$comma = "";
+	$deleted_users = array();
 
 	if (!empty($del_users)) {
 		foreach ($del_users as $userid) {
@@ -133,9 +137,7 @@ if (isset($_POST['dellall'])) {
 				if ($a_user[$userid]['name'] == $_SESSION['Username']) {
 					$delete_errors[] = sprintf(gettext("Cannot delete user %s because you are currently logged in as that user."), $a_user[$userid]['name']);
 				} else {
-					$deleted_users = $deleted_users . $comma . $a_user[$userid]['name'];
-					$comma = ", ";
-					$deleted_count++;
+					$deleted_users[] = $a_user[$userid]['name'];
 					local_user_del($a_user[$userid]);
 					unset($a_user[$userid]);
 				}
@@ -144,13 +146,12 @@ if (isset($_POST['dellall'])) {
 			}
 		}
 
-		if ($deleted_count > 0) {
-			if ($deleted_count == 1) {
-				$savemsg = sprintf(gettext("User %s successfully deleted."), $deleted_users);
-			} else {
-				$savemsg = sprintf(gettext("Users %s successfully deleted."), $deleted_users);
-			}
+		if (count($deleted_users) > 0) {
+			$savemsg = sprintf(gettext("Successfully deleted %s: %s"), (count($deleted_users) == 1) ? gettext("user") : gettext("users"), implode(', ', $deleted_users));
+			/* Reindex the array to avoid operating on an incorrect index https://redmine.pfsense.org/issues/7733 */
+			$a_user = array_values($a_user);
 			write_config($savemsg);
+			syslog($logging_level, "{$logging_prefix}: {$savemsg}");
 		}
 	}
 }
@@ -165,18 +166,20 @@ if ($_POST['act'] == "delcert") {
 	$certdeleted = lookup_cert($a_user[$id]['cert'][$_POST['certid']]);
 	$certdeleted = $certdeleted['descr'];
 	unset($a_user[$id]['cert'][$_POST['certid']]);
-	write_config();
+	$savemsg = sprintf(gettext("Removed certificate association \"%s\" from user %s"), $certdeleted, $a_user[$id]['name']);
+	write_config($savemsg);
+	syslog($logging_level, "{$logging_prefix}: {$savemsg}");
 	$_POST['act'] = "edit";
-	$savemsg = sprintf(gettext("Certificate %s association removed."), $certdeleted);
 }
 
 if ($_POST['act'] == "delprivid") {
 	$privdeleted = $priv_list[$a_user[$id]['priv'][$_POST['privid']]]['name'];
 	unset($a_user[$id]['priv'][$_POST['privid']]);
 	local_user_set($a_user[$id]);
-	write_config();
+	$savemsg = sprintf(gettext("Removed Privilege \"%s\" from user %s"), $privdeleted, $a_user[$id]['name']);
+	write_config($savemsg);
+	syslog($logging_level, "{$logging_prefix}: {$savemsg}");
 	$_POST['act'] = "edit";
-	$savemsg = sprintf(gettext("Privilege %s removed."), $privdeleted);
 }
 
 if ($_POST['save']) {
@@ -211,8 +214,8 @@ if ($_POST['save']) {
 		$input_errors[] = gettext("The username contains invalid characters.");
 	}
 
-	if (strlen($_POST['usernamefld']) > 16) {
-		$input_errors[] = gettext("The username is longer than 16 characters.");
+	if (strlen($_POST['usernamefld']) > 32) {
+		$input_errors[] = gettext("The username is longer than 32 characters.");
 	}
 
 	if (($_POST['passwordfld1']) && ($_POST['passwordfld1'] != $_POST['passwordfld2'])) {
@@ -282,6 +285,10 @@ if ($_POST['save']) {
 			$input_errors[] = gettext("Invalid internal Certificate Authority") . "\n";
 		}
 	}
+	validate_webguicss_field($input_errors, $_POST['webguicss']);
+	validate_webguifixedmenu_field($input_errors, $_POST['webguifixedmenu']);
+	validate_webguihostnamemenu_field($input_errors, $_POST['webguihostnamemenu']);
+	validate_dashboardcolumns_field($input_errors, $_POST['dashboardcolumns']);
 
 	if (!$input_errors) {
 
@@ -411,9 +418,9 @@ if ($_POST['save']) {
 					'organizationName' => $subject[3]['v'],
 					'emailAddress' => $subject[4]['v'],
 					'commonName' => $userent['name']);
-				$altnames_tmp = array(cert_add_altname_type($userent['name']));
-				if (!empty($altnames_tmp)) {
-					$dn['subjectAltName'] = implode(",", $altnames_tmp);
+				$cn_altname = cert_add_altname_type($userent['name']);
+				if (!empty($cn_altname)) {
+					$dn['subjectAltName'] = $cn_altname;
 				}
 
 				cert_create($cert, $_POST['caref'], $_POST['keylen'],
@@ -440,17 +447,19 @@ if ($_POST['save']) {
 			$a_user[] = $userent;
 		}
 
-		/* Add user to groups so PHP can see the memberships properly or else the user's shell account does not get proper permissions (if applicable) See #5152. */
+		/* Sort it alphabetically */
+		usort($config['system']['user'], function($a, $b) {
+			return strcmp($a['name'], $b['name']);
+		});
+
 		local_user_set_groups($userent, $_POST['groups']);
 		local_user_set($userent);
-		/* Add user to groups again to ensure they are set everywhere, otherwise the user may not appear to be a member of the group. See commit:5372d26d9d25d751d16865ed9d46869d3b0ec5e1. */
-		local_user_set_groups($userent, $_POST['groups']);
-		write_config();
-
+		$savemsg = sprintf(gettext("Successfully %s user %s"), (isset($id)) ? gettext("edited") : gettext("created"), $userent['name']);
+		write_config($savemsg);
+		syslog($logging_level, "{$logging_prefix}: {$savemsg}");
 		if (is_dir("/etc/inc/privhooks")) {
 			run_plugins("/etc/inc/privhooks");
 		}
-
 
 		pfSenseHeader("system_usermanager.php");
 	}
@@ -817,7 +826,7 @@ if ($act == "new" || $act == "edit" || $input_errors):
 
 	foreach ($config['system']['group'] as $Ggroup) {
 		if ($Ggroup['name'] != "all") {
-			if (($act == 'edit') && $Ggroup['member'] && in_array($pconfig['uid'], $Ggroup['member'])) {
+			if (($act == 'edit' || $input_errors) && $Ggroup['member'] && in_array($a_user[$id]['uid'], $Ggroup['member'])) {
 				$usersGroups[ $Ggroup['name'] ] = $Ggroup['name'];	// Add it to the user's list
 			} else {
 				$systemGroups[ $Ggroup['name'] ] = $Ggroup['name']; // Add it to the 'not a member of' list

@@ -3,7 +3,7 @@
  * status_captiveportal_expire.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2007 Marcel Wiget <mwiget@mac.com>
  * All rights reserved.
  *
@@ -57,13 +57,11 @@ $pglinks = array("", "status_captiveportal.php", "status_captiveportal.php?zone=
 
 include("head.inc");
 
-if ($_POST['save']) {
-	if ($_POST['vouchers']) {
-		if (voucher_expire($_POST['vouchers'])) {
-			print_info_box(gettext('Voucher(s) successfully marked.'), 'success', false);
-		} else {
-			print_info_box(gettext('Voucher(s) could not be processed.'), 'danger', false);
-		}
+if ($_POST['Submit'] && $_POST['vouchers']) {
+	if (voucher_expire(trim($_POST['vouchers']))) {
+		print_info_box(gettext('Voucher(s) successfully marked.'), 'success', false);
+	} else {
+		print_info_box(gettext('Voucher(s) could not be processed.'), 'danger', false);
 	}
 }
 

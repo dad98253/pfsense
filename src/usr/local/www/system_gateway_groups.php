@@ -3,7 +3,7 @@
  * system_gateway_groups.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2010 Seth Mos <seth.mos@dds.nl>
  * All rights reserved.
  *
@@ -32,6 +32,10 @@ require_once("functions.inc");
 require_once("filter.inc");
 require_once("shaper.inc");
 require_once("openvpn.inc");
+
+if (!is_array($config['gateways'])) {
+	$config['gateways'] = array();
+}
 
 if (!is_array($config['gateways']['gateway_group'])) {
 	$config['gateways']['gateway_group'] = array();

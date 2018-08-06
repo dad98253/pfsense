@@ -3,7 +3,7 @@
  * system_routes.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -34,6 +34,10 @@ require_once("guiconfig.inc");
 require_once("functions.inc");
 require_once("filter.inc");
 require_once("shaper.inc");
+
+if (!is_array($config['staticroutes'])) {
+	$config['staticroutes'] = array();
+}
 
 if (!is_array($config['staticroutes']['route'])) {
 	$config['staticroutes']['route'] = array();

@@ -3,7 +3,7 @@
  * certs.inc
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2008-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2008-2018 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2008 Shrew Soft Inc. All rights reserved.
  * All rights reserved.
  *
@@ -28,15 +28,17 @@ global $openssl_digest_algs;
 $openssl_digest_algs = array("sha1", "sha224", "sha256", "sha384", "sha512");
 
 global $openssl_crl_status;
+/* Numbers are set in the RFC: https://www.ietf.org/rfc/rfc5280.txt */
 $openssl_crl_status = array(
-	OCSP_REVOKED_STATUS_NOSTATUS              => "No Status (default)",
-	OCSP_REVOKED_STATUS_UNSPECIFIED           => "Unspecified",
-	OCSP_REVOKED_STATUS_KEYCOMPROMISE         => "Key Compromise",
-	OCSP_REVOKED_STATUS_CACOMPROMISE          => "CA Compromise",
-	OCSP_REVOKED_STATUS_AFFILIATIONCHANGED    => "Affiliation Changed",
-	OCSP_REVOKED_STATUS_SUPERSEDED            => "Superseded",
-	OCSP_REVOKED_STATUS_CESSATIONOFOPERATION  => "Cessation of Operation",
-	OCSP_REVOKED_STATUS_CERTIFICATEHOLD       => "Certificate Hold"
+	-1 => "No Status (default)",
+	0  => "Unspecified",
+	1 => "Key Compromise",
+	2 => "CA Compromise",
+	3 => "Affiliation Changed",
+	4 => "Superseded",
+	5 => "Cessation of Operation",
+	6 => "Certificate Hold",
+	9 => 'Privilege Withdrawn',
 );
 
 global $cert_altname_types;
@@ -435,7 +437,7 @@ function csr_generate(& $cert, $keylen, $dn, $type = "user", $digest_alg = "sha2
 	return true;
 }
 
-function csr_sign($csr, & $ca, $duration, $type = "user", $altnames) {
+function csr_sign($csr, & $ca, $duration, $type = "user", $altnames, $digest_alg = "sha256") {
 	global $config;
 	$old_err_level = error_reporting(0);
 
@@ -460,6 +462,7 @@ function csr_sign($csr, & $ca, $duration, $type = "user", $altnames) {
 
 	$args = array(
 		"x509_extensions" => $cert_type,
+		"digest_alg" => $digest_alg,
 		"req_extensions" => "req_{$cert_type}"
 	);
 
@@ -602,20 +605,23 @@ function cert_get_publickey($str_crt, $decode = true, $type = "crt") {
 	if ($decode) {
 		$str_crt = base64_decode($str_crt);
 	}
+	$certfn = tempnam('/tmp', 'CGPK');
+	file_put_contents($certfn, $str_crt);
 	switch ($type) {
 		case 'prv':
-			exec("echo \"{$str_crt}\" | openssl pkey -pubout", $out);
+			exec("/usr/bin/openssl pkey -in {$certfn} -pubout", $out);
 			break;
 		case 'crt':
-			exec("echo \"{$str_crt}\" | openssl x509 -inform pem -noout -pubkey", $out);
+			exec("/usr/bin/openssl x509 -in {$certfn} -inform pem -noout -pubkey", $out);
 			break;
 		case 'csr':
-			exec("echo \"{$str_crt}\" | openssl req -inform pem -noout -pubkey", $out);
+			exec("/usr/bin/openssl req -in {$certfn} -inform pem -noout -pubkey", $out);
 			break;
 		default:
 			$out = array();
 			break;
 	}
+	unlink($certfn);
 	return implode("\n", $out);
 }
 
@@ -656,6 +662,17 @@ function cert_get_purpose($str_crt, $decode = true) {
 	return $purpose;
 }
 
+function cert_get_ocspstaple($str_crt, $decode = true) {
+	if ($decode) {
+		$str_crt = base64_decode($str_crt);
+	}
+	$crt_details = openssl_x509_parse($str_crt);
+	if (!empty($crt_details['extensions']['1.3.6.1.5.5.7.1.24'])) {
+		return true;
+	}
+	return false;
+}
+
 function cert_get_dates($str_crt, $decode = true) {
 	if ($decode) {
 		$str_crt = base64_decode($str_crt);
@@ -680,6 +697,26 @@ function cert_get_serial($str_crt, $decode = true) {
 	} else {
 		return NULL;
 	}
+}
+
+function cert_get_sigtype($str_crt, $decode = true) {
+	if ($decode) {
+		$str_crt = base64_decode($str_crt);
+	}
+	$crt_details = openssl_x509_parse($str_crt);
+
+	$signature = array();
+	if (isset($crt_details['signatureTypeSN']) && !empty($crt_details['signatureTypeSN'])) {
+		$signature['shortname'] = $crt_details['signatureTypeSN'];
+	}
+	if (isset($crt_details['signatureTypeLN']) && !empty($crt_details['signatureTypeLN'])) {
+		$signature['longname'] = $crt_details['signatureTypeLN'];
+	}
+	if (isset($crt_details['signatureTypeNID']) && !empty($crt_details['signatureTypeNID'])) {
+		$signature['nid'] = $crt_details['signatureTypeNID'];
+	}
+
+	return $signature;
 }
 
 function is_openvpn_server_ca($caref) {
@@ -878,12 +915,32 @@ function crl_create(& $crl, $caref, $name, $serial = 0, $lifetime = 9999) {
 	$crl['serial'] = $serial;
 	$crl['lifetime'] = $lifetime;
 	$crl['cert'] = array();
-	$crl_res = crl_update($crl);
 	$config['crl'][] = $crl;
-	return $crl_res;
+	return $crl;
 }
 
 function crl_update(& $crl) {
+	require_once('ASN1.php');
+	require_once('ASN1_UTF8STRING.php');
+	require_once('ASN1_ASCIISTRING.php');
+	require_once('ASN1_BITSTRING.php');
+	require_once('ASN1_BOOL.php');
+	require_once('ASN1_GENERALTIME.php');
+	require_once('ASN1_INT.php');
+	require_once('ASN1_ENUM.php');
+	require_once('ASN1_NULL.php');
+	require_once('ASN1_OCTETSTRING.php');
+	require_once('ASN1_OID.php');
+	require_once('ASN1_SEQUENCE.php');
+	require_once('ASN1_SET.php');
+	require_once('ASN1_SIMPLE.php');
+	require_once('ASN1_TELETEXSTRING.php');
+	require_once('ASN1_UTCTIME.php');
+	require_once('OID.php');
+	require_once('X509.php');
+	require_once('X509_CERT.php');
+	require_once('X509_CRL.php');
+
 	global $config;
 	$ca =& lookup_ca($crl['caref']);
 	if (!$ca) {
@@ -894,17 +951,31 @@ function crl_update(& $crl) {
 		return false;
 	}
 	$crl['serial']++;
-	$ca_str_crt = base64_decode($ca['crt']);
-	$ca_str_key = base64_decode($ca['prv']);
-	$crl_res = openssl_crl_new($ca_str_crt, $crl['serial'], $crl['lifetime']);
+	$ca_cert = \Ukrbublik\openssl_x509_crl\X509::pem2der(base64_decode($ca['crt']));
+	$ca_pkey = openssl_pkey_get_private(base64_decode($ca['prv']));
+
+	$crlconf = array(
+		'no' => $crl['serial'],
+		'version' => 2,
+		'days' => $crl['lifetime'],
+		'alg' => OPENSSL_ALGO_SHA1,
+		'revoked' => array()
+	);
+
 	if (is_array($crl['cert']) && (count($crl['cert']) > 0)) {
 		foreach ($crl['cert'] as $cert) {
-			openssl_crl_revoke_cert($crl_res, base64_decode($cert["crt"]), $cert["revoke_time"], $cert["reason"]);
+			$crlconf['revoked'][] = array(
+				'serial' => cert_get_serial($cert["crt"], true),
+				'rev_date' => $cert["revoke_time"],
+				'reason' => ($cert["reason"] == -1) ? null : (int) $cert["reason"],
+			);
 		}
 	}
-	openssl_crl_export($crl_res, $crl_text, $ca_str_key);
-	$crl['text'] = base64_encode($crl_text);
-	return $crl_res;
+
+	$crl_data = \Ukrbublik\openssl_x509_crl\X509_CRL::create($crlconf, $ca_pkey, $ca_cert);
+	$crl['text'] = base64_encode(\Ukrbublik\openssl_x509_crl\X509::der2pem4crl($crl_data));
+
+	return $crl['text'];
 }
 
 function cert_revoke($cert, & $crl, $reason = OCSP_REVOKED_STATUS_UNSPECIFIED) {
@@ -1059,7 +1130,7 @@ function cert_add_altname_type($str) {
 	$type = "";
 	if (is_ipaddr($str)) {
 		$type = "IP";
-	} elseif (is_hostname($str)) {
+	} elseif (is_hostname($str, true)) {
 		$type = "DNS";
 	} elseif (is_URL($str)) {
 		$type = "URI";
@@ -1069,7 +1140,7 @@ function cert_add_altname_type($str) {
 	if (!empty($type)) {
 		return "{$type}:" . cert_escape_x509_chars($str);
 	} else {
-		return "";
+		return null;
 	}
 }
 

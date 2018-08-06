@@ -3,7 +3,7 @@
  * vpn_openvpn_csc.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2008 Shrew Soft Inc.
  * All rights reserved.
  *
@@ -33,6 +33,10 @@ require_once("pfsense-utils.inc");
 require_once("pkg-utils.inc");
 
 global $openvpn_tls_server_modes;
+
+if (!is_array($config['openvpn'])) {
+	$config['openvpn'] = array();
+}
 
 if (!is_array($config['openvpn']['openvpn-csc'])) {
 	$config['openvpn']['openvpn-csc'] = array();

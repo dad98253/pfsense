@@ -4,7 +4,7 @@
  * rc.initial.setlanip
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally part of m0n0wall (http://m0n0.ch/wall)
@@ -209,12 +209,8 @@ function add_gateway_to_config($interface, $gatewayip, $inet_type) {
 		print_r($a_gateways);
 	}
 	$new_name = '';
-	$is_default = true;
 	foreach ($a_gateways as $item) {
 		if ($item['ipprotocol'] === $inet_type) {
-			if (isset($item['defaultgw'])) {
-				$is_default = false;
-			}
 			if (($item['interface'] === $interface) && ($item['gateway'] === $gatewayip)) {
 				$new_name = $item['name'];
 			}
@@ -229,13 +225,20 @@ function add_gateway_to_config($interface, $gatewayip, $inet_type) {
 			"weight" => 1,
 			"ipprotocol" => $inet_type,
 			"interval" => true,
-			"descr" => "Interface $interface Gateway",
-			"defaultgw" => $is_default
+			"descr" => "Interface $interface Gateway"
 		);
 		if ($dry_run) {
 			print_r($item);
 		}
 		$a_gateways[] = $item;
+	}
+
+	//set the new GW as the default if there isnt one set yet
+	if ($item['ipprotocol'] == "inet" && empty(isset($config['gateways']['defaultgw4']))) {
+		$config['gateways']['defaultgw4'] = $new_name;
+	}
+	if ($item['ipprotocol'] == "inet6" && empty(isset($config['gateways']['defaultgw6']))) {
+		$config['gateways']['defaultgw6'] = $new_name;
 	}
 
 	return $new_name;
@@ -269,6 +272,11 @@ function console_configure_ip_address($version) {
 				echo "\n" . sprintf(gettext('Enter the new %1$s %2$s address.  Press <ENTER> for none:'),
 							$upperifname, $label_IPvX) . "\n> ";
 				$intip = chop(fgets($fp));
+				$intbits_ok = false;
+				if (strstr($intip, "/")) {
+					list($intip, $intbits) = explode("/", $intip);
+					$intbits_ok = (is_numeric($intbits) && (($intbits >= 1) && ($intbits <= $maxbits))) ? true : false;
+				}
 				$is_ipaddr = ($version === 6) ? is_ipaddrv6($intip) : is_ipaddrv4($intip);
 				if ($is_ipaddr && is_ipaddr_configured($intip, $interface, true)) {
 					$ip_conflict = true;
@@ -277,21 +285,23 @@ function console_configure_ip_address($version) {
 					$ip_conflict = false;
 				}
 			} while (($ip_conflict === true) || !($is_ipaddr || $intip == ''));
-			if ($intip != '') {
-				echo "\n" . sprintf(gettext("Subnet masks are entered as bit counts (as in CIDR notation) in %s."),
+			if ($is_ipaddr && $intip != '') {
+				if ($intbits_ok == false) {
+					echo "\n" . sprintf(gettext("Subnet masks are entered as bit counts (as in CIDR notation) in %s."),
 							$g['product_name']) . "\n";
-				if ($version === 6) {
-					echo "e.g. ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00 = 120\n";
-					echo "     ffff:ffff:ffff:ffff:ffff:ffff:ffff:0    = 112\n";
-					echo "     ffff:ffff:ffff:ffff:ffff:ffff:0:0       =  96\n";
-					echo "     ffff:ffff:ffff:ffff:ffff:0:0:0          =  80\n";
-					echo "     ffff:ffff:ffff:ffff:0:0:0:0             =  64\n";
-				} else {
-					echo "e.g. 255.255.255.0 = 24\n";
-					echo "     255.255.0.0   = 16\n";
-					echo "     255.0.0.0     = 8\n";
+					if ($version === 6) {
+						echo "e.g. ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00 = 120\n";
+						echo "     ffff:ffff:ffff:ffff:ffff:ffff:ffff:0    = 112\n";
+						echo "     ffff:ffff:ffff:ffff:ffff:ffff:0:0       =  96\n";
+						echo "     ffff:ffff:ffff:ffff:ffff:0:0:0          =  80\n";
+						echo "     ffff:ffff:ffff:ffff:0:0:0:0             =  64\n";
+					} else {
+						echo "e.g. 255.255.255.0 = 24\n";
+						echo "     255.255.0.0   = 16\n";
+						echo "     255.0.0.0     = 8\n";
+					}
 				}
-				do {
+				while ($intbits_ok == false) {
 					$upperifname = strtoupper($interface);
 					echo "\n" . sprintf(gettext('Enter the new %1$s %2$s subnet bit count (1 to %3$s):'),
 								$upperifname, $label_IPvX, $maxbits) . "\n> ";
@@ -310,7 +320,7 @@ function console_configure_ip_address($version) {
 							$intbits_ok = false;
 						}
 					}
-				} while (!$intbits_ok);
+				}
 
 				if ($version === 6) {
 					$subnet = gen_subnetv6($intip, $intbits);

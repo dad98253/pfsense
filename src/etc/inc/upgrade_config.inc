@@ -3,7 +3,7 @@
  * upgrade_config.inc
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -1481,7 +1481,7 @@ function upgrade_049_to_050() {
 	}
 
 	/* sync all local account information */
-	local_sync_accounts();
+	local_reset_accounts();
 }
 
 
@@ -2064,13 +2064,6 @@ function upgrade_054_to_055() {
 
 	$rrddbpath = "/var/db/rrd/";
 	$rrdtool = "/usr/bin/nice -n20 /usr/local/bin/rrdtool";
-	if (isset($config['system']['use_mfs_tmpvar'])) {
-		/* restore the databases, if we have one */
-		if (restore_rrd()) {
-			/* Make sure to move the rrd backup out of the way. We will make a new one after converting. */
-			@rename("{$g['cf_conf_path']}/rrd.tgz", "{$g['cf_conf_path']}/backup/rrd.tgz");
-		}
-	}
 
 	$rrdinterval = 60;
 	$valid = $rrdinterval * 2;
@@ -2783,14 +2776,6 @@ function upgrade_080_to_081() {
 	$rrddbpath = "/var/db/rrd/";
 	$rrdtool = "/usr/bin/nice -n20 /usr/local/bin/rrdtool";
 
-	if (isset($config['system']['use_mfs_tmpvar'])) {
-		/* restore the databases, if we have one */
-		if (restore_rrd()) {
-			/* Make sure to move the rrd backup out of the way. We will make a new one after converting. */
-			@rename("{$g['cf_conf_path']}/rrd.tgz", "{$g['cf_conf_path']}/backup/rrd.tgz");
-		}
-	}
-
 	$rrdinterval = 60;
 	$valid = $rrdinterval * 2;
 
@@ -3255,14 +3240,6 @@ function upgrade_095_to_096() {
 	$rrddbpath = "/var/db/rrd";
 	$rrdtool = "/usr/local/bin/rrdtool";
 
-	if (isset($config['system']['use_mfs_tmpvar'])) {
-		/* restore the databases, if we have one */
-		if (restore_rrd()) {
-			/* Make sure to move the rrd backup out of the way. We will make a new one after converting. */
-			@rename("{$g['cf_conf_path']}/rrd.tgz", "{$g['cf_conf_path']}/backup/rrd.tgz");
-		}
-	}
-
 	/* Assume 2*10GigE for now */
 	$stream = 2500000000;
 
@@ -3433,7 +3410,7 @@ function upgrade_103_to_104() {
 	}
 
 	/* sync all local account information */
-	local_sync_accounts();
+	local_reset_accounts();
 }
 
 function upgrade_104_to_105() {
@@ -4648,14 +4625,6 @@ function upgrade_145_to_146() {
 	$awkcmd .= "    print;\n";
 	$awkcmd .= "}'";
 
-	if (isset($config['system']['use_mfs_tmpvar'])) {
-		/* restore the databases, if we have one */
-		if (restore_rrd()) {
-			/* Make sure to move the rrd backup out of the way. We will make a new one after converting. */
-			@rename("{$g['cf_conf_path']}/rrd.tgz", "{$g['cf_conf_path']}/backup/rrd.tgz");
-		}
-	}
-
 	$databases = return_dir_as_array($rrddbpath, '/-quality\.rrd$/');
 	foreach ($databases as $database) {
 		$xmldump = "{$g['tmp_path']}/{$database}.xml";
@@ -4748,7 +4717,7 @@ function upgrade_147_to_148() {
 		// if there was a space in a group name, there may be multiple
 		// groups with the same name in the group file. To prevent pw
 		// from getting into a neverending loop, delete all user-defined
-		// groups here. local_sync_accounts will run shortly after this
+		// groups here. local_reset_accounts will run shortly after this
 		// and add them back. redmine #6012
 		if ($cleargroups) {
 			foreach ($config['system']['group'] as $grp) {
@@ -5373,6 +5342,12 @@ function upgrade_168_to_169() {
 	unset($config['cron']['rc_update_pkg_metadata']);
 
 	$command = '/usr/bin/nice -n20 /etc/rc.update_pkg_metadata';
+	if (!is_array($config['cron'])) {
+		$config['cron'] = array();
+	}
+	if (!is_array($config['cron']['item'])) {
+		$config['cron']['item'] = array();
+	}
 	if (is_array($config['cron']['item'])) {
 		foreach ($config['cron']['item'] as $entry) {
 			if ($entry['command'] == $command) {
@@ -5415,6 +5390,405 @@ function upgrade_169_to_170() {
 				$config['wireless']['clone'][] = $wlan;
 				/* The interface assignment must now be the cloned interface name. */
 				$iface['if'] = $wlan['cloneif'];
+			}
+		}
+	}
+}
+
+/* Upgrade the VLAN interface names to use $if.$tag instead of $if_vlan$tag.
+ * This helps keep the interface names smaller than the limit.
+ */
+function upgrade_170_to_171() {
+	global $config;
+
+	if (!is_array($config['vlans']['vlan']) || count($config['vlans']['vlan']) == 0) {
+		return;
+	}
+	$iflist = get_configured_interface_list(true);
+	foreach ($config['vlans']['vlan'] as $id => $vlan) {
+		/* Make sure to update the interfaces section with the new name. */
+		$vlan_name = "{$vlan['if']}_vlan{$vlan['tag']}";
+		foreach ($iflist as $ifname) {
+			if ($config['interfaces'][$ifname]['if'] == $vlan_name) {
+				$config['interfaces'][$ifname]['if'] = vlan_interface($vlan);
+			}
+		}
+		$config['vlans']['vlan'][$id]['vlanif'] = vlan_interface($vlan);
+	}
+}
+
+/* Upgrade the QinQ interface names to use $if.$tag instead of $if_$tag.
+ * This helps keep the interface names smaller than the limit (but they are still
+ * big with the QinQ subtag).
+ */
+function upgrade_171_to_172() {
+	global $config;
+
+	if (!is_array($config['qinqs']['qinqentry']) || count($config['qinqs']['qinqentry']) == 0) {
+		return;
+	}
+	$iflist = get_configured_interface_list(true);
+	foreach ($config['qinqs']['qinqentry'] as $id => $qinq) {
+		$config['qinqs']['qinqentry'][$id]['vlanif'] = vlan_interface($qinq);
+
+		if (!isset($qinq['members'])) {
+			continue;
+		}
+		foreach (explode(" ", $qinq['members']) as $tag) {
+			/* Make sure to update the interfaces section with the new name. */
+			$vlan_name = "{$qinq['if']}_{$qinq['tag']}_{$tag}";
+			foreach ($iflist as $ifname) {
+				if ($config['interfaces'][$ifname]['if'] == $vlan_name) {
+					$config['interfaces'][$ifname]['if'] = qinq_interface($qinq, $tag);
+				}
+			}
+		}
+	}
+}
+
+/*
+ * Upgrade the VLAN interface names to use $if.$tag on PPP items
+ */
+function upgrade_172_to_173() {
+	global $config;
+
+	if (!is_array($config['ppps']['ppp']) ||
+	    count($config['ppps']['ppp']) == 0) {
+		return;
+	}
+	$iflist = get_configured_interface_list(true);
+	foreach ($config['ppps']['ppp'] as $id => $ppp) {
+		if (empty($ppp['ports']) ||
+		    strpos($ppp['ports'], "_vlan") == false) {
+			continue;
+		}
+
+		$config['ppps']['ppp'][$id]['ports'] = str_replace('_vlan', '.',
+		    $ppp['ports']);
+	}
+}
+
+/*
+ * Dynamic DNS nsupdate keyfiles have been replaced with a simpler ddns-confgen style file.
+ */
+function upgrade_173_to_174() {
+	global $config;
+
+	/* Stop if there is nothing to do. */
+	if (!is_array($config['dnsupdates']['dnsupdate'])) {
+		return;
+	}
+	/* Remove unused keytype field. */
+	foreach ($config['dnsupdates']['dnsupdate'] as $i => &$dnsupdate) {
+		unset($dnsupdate['keytype']);
+	}
+}
+
+/* IPsec Phase1 now supports multiple authentication ciphers to be specified from the webgui.
+ * This is usefull for mobile users using different OS's supporting different ciphers.
+ */
+function upgrade_174_to_175() {
+	global $config;
+	if (is_array($config['ipsec']['phase1'])) {
+		$a_phase1 = &$config['ipsec']['phase1'];
+		foreach($a_phase1 as &$phase1) {
+			$item = array();
+			$item['encryption-algorithm'] = $phase1['encryption-algorithm'];
+			$item['hash-algorithm'] = $phase1['hash-algorithm'];
+			$item['dhgroup'] = $phase1['dhgroup'];
+			$phase1['encryption']['item'][] = $item;
+			unset($phase1['encryption-algorithm']);
+			unset($phase1['hash-algorithm']);
+			unset($phase1['dhgroup']);
+		}
+	}
+}
+
+/* igmp always was enabled by default if settings were present.
+ * So enable it once on upgrade if settings are there.
+ * And provide the option through gui to disable it again
+ */
+function upgrade_175_to_176() {
+	global $config;
+	if (is_array($config['igmpproxy']['igmpentry']) && (count($config['igmpproxy']['igmpentry']) > 0)) {
+		$config['igmpproxy']['enable'] = true;
+	}
+}
+
+/* Placeholder for a factory update. */
+function upgrade_176_to_177() {
+}
+
+// The image displayed by the picture widget is now stored on the file system
+function upgrade_177_to_178() {
+	global $config;
+
+	if (isset($config['widgets'])) {
+		$idx = 0;
+
+		while (isset($config['widgets']['picture-' . $idx])) {
+			file_put_contents("/conf/widget_image.picture-" . $idx, base64_decode($config['widgets']['picture-' . $idx]['picturewidget']));
+			$config['widgets']['picture-' . $idx]['picturewidget'] = "/conf/widget_image.picture-". $idx;
+			$idx++;
+		}
+	}
+}
+
+/* Placeholder for a factory update. */
+function upgrade_178_to_179() {
+}
+
+function upgrade_179_to_180() {
+	global $config, $g;
+
+	/* Change default to 400000 to make sure bogonsv6 works */
+	if (empty($config['system']['maximumtableentries'])) {
+		$config['system']['maximumtableentries'] =
+		    $g['minimumtableentries_bogonsv6'];
+	}
+}
+
+/*
+ * Automatically enable retrieving captive portal bandwidth limits from RADIUS for each captive portal
+ */
+function upgrade_180_to_181() {
+	global $config;
+
+	if (is_array($config['captiveportal'])) {
+		foreach ($config['captiveportal'] as $cpzone => $cpcfg) {
+			if ($cpcfg['auth_method'] == "radius") {
+				$config['captiveportal'][$cpzone]['radiusperuserbw'] = true;
+			}
+		}
+	}
+}
+
+function upgrade_181_to_182() {
+	global $config;
+
+	/*
+	 * Some gateways did not have an ipprotocol set, and some configurations
+	 * did not have a default set so one was assumed. To avoid leaving the
+	 * user without a default, fix these situations first.
+	 */
+	$defgw_v4_found = false;
+	$defgw_v6_found = false;
+	$defgw_v4_candidate = array();
+	$defgw_v6_candidate = array();
+	if (is_array($config['gateways']) && is_array($config['gateways']['gateway_item'])) {
+		foreach($config['gateways']['gateway_item'] as &$item) {
+			/* Attempt to determine IP protocol for static gateways
+			 * missing the protocol definition */
+			if (empty($item['ipprotocol'])) {
+				if (is_ipaddrv4($item['gateway'])) {
+					$item['ipprotocol'] = 'inet';
+				} elseif (is_ipaddrv6($item['gateway'])) {
+					$item['ipprotocol'] = 'inet6';
+				}
+			}
+			/* Check if we have found a default gw */
+			if (isset($item['defaultgw'])) {
+				if ($item['ipprotocol'] == 'inet') {
+					$defgw_v4_found = true;
+				} elseif ($item['ipprotocol'] == 'inet6') {
+					$defgw_v6_found = true;
+				}
+			} else {
+				/* This isn't a default gateway, but could it be? */
+				if ($item['ipprotocol'] == 'inet') {
+					if (!$defgw_v4_found &&
+					    ($item['interface'] == "wan")) {
+						$defgw_v4_candidate = &$item;
+					}
+				} elseif ($item['ipprotocol'] == 'inet6') {
+					if (!$defgw_v6_found &&
+					    ($item['interface'] == "wan")) {
+						$defgw_v6_candidate = &$item;
+					}
+				}
+			}
+		}
+	}
+	/* If there was no other default gateway, use the one of last resort. */
+	if (!$defgw_v4_found && !empty($defgw_v4_candidate)) {
+		$defgw_v4_candidate['defaultgw'] = true;
+	}
+	if (!$defgw_v6_found && !empty($defgw_v6_candidate)) {
+		$defgw_v6_candidate['defaultgw'] = true;
+	}
+
+	if (isset($config['system']['gw_switch_default'])) {
+		// default gateway switching was enabled, convert gatewaygroup
+		$newgroup4 = array();
+		$newgroup6 = array();
+		$tiernr4 = 2;
+		$tiernr6 = 2;
+		if (is_array($config['gateways']) && is_array($config['gateways']['gateway_item'])) {
+			foreach($config['gateways']['gateway_item'] as &$item) {
+				if ($item['ipprotocol'] == 'inet') {
+					if (isset($item['defaultgw'])) {
+						$tier = 1;
+						unset($item['defaultgw']);
+					} else {
+						$tier = $tiernr4;
+					}
+					$newgroup4['item'][] = $item['name']."|$tier|address";
+					if ($tiernr4 < 5) {
+						$tiernr4++;
+					}
+				}
+				if ($item['ipprotocol'] == 'inet6') {
+					if (isset($item['defaultgw'])) {
+						$tier = 1;
+						unset($item['defaultgw']);
+					} else {
+						$tier = $tiernr6;
+					}
+					$newgroup6['item'][] = $item['name']."|$tier|address";
+					if ($tiernr6 < 5) {
+						$tiernr6++;
+					}
+				}
+			}
+		}
+		if (count($newgroup4['item']) > 0) {
+			$newname = "Default_Gateway_Group_ipv4";
+			if (gateway_or_gwgroup_exists($newname)) { //make sure we create a new name
+				$id = 2;
+				while (gateway_or_gwgroup_exists($newname."_".$id)) {
+					$id++;
+				}
+				$newname .= "_".$id;
+			}
+			$newgroup4['name'] = $newname;
+			$newgroup4['trigger'] = 0;
+			$newgroup4['descr'] = "Default gateway group IPv4";
+			$config['gateways']['gateway_group'][] = $newgroup4;
+			$config['gateways']['defaultgw4'] = $newname;
+		}
+		if (count($newgroup6['item']) > 0) {
+			$newname = "Default_Gateway_Group_ipv6";
+			if (gateway_or_gwgroup_exists($newname)) { //make sure we create a new name
+				$id = 2;
+				while (gateway_or_gwgroup_exists($newname."_".$id)) {
+					$id++;
+				}
+				$newname .= "_".$id;
+			}
+			$newgroup6['name'] = $newname;
+			$newgroup6['trigger'] = 0;
+			$newgroup6['descr'] = "Default gateway group IPv6";
+			$config['gateways']['gateway_group'][] = $newgroup6;
+			$config['gateways']['defaultgw6'] = $newname;
+		}
+		unset($config['system']['gw_switch_default']);// remove old setting, if a group is used switching is already implied
+	} else {
+		// set new defaultgw selection boxes to old selected default
+		if (is_array($config['gateways']) && is_array($config['gateways']['gateway_item'])) {
+			foreach($config['gateways']['gateway_item'] as &$item) {
+				if (isset($item['defaultgw'])) {
+					if ($item['ipprotocol'] == 'inet') {
+						$config['gateways']['defaultgw4'] = $item['name'];
+					} else {
+						$config['gateways']['defaultgw6'] = $item['name'];
+					}
+					unset($item['defaultgw']);
+				}
+			}
+		}
+	}
+}
+
+/* Correct gateway group trigger level values.
+ * See https://redmine.pfsense.org/issues/8586
+ */
+function upgrade_182_to_183() {
+	global $config;
+	if (!is_array($config['gateways']) ||
+	    !is_array($config['gateways']['gateway_group'])) {
+		/* No gateway groups, nothing to do. */
+		return;
+	}
+	foreach ($config['gateways']['gateway_group'] as &$gwg) {
+		switch ($gwg['trigger']) {
+			case "0":
+				/* '0' => gettext('Member down'), */
+				/* 'down' => gettext("Member Down"), */
+				$gwg['trigger'] = "down";
+				break;
+			case "1":
+				/* '1' => gettext('Packet Loss'), */
+				/* 'downloss' => gettext("Packet Loss"), */
+				$gwg['trigger'] = "downloss";
+				break;
+			case "2":
+				/* '2' => gettext('High Latency'), */
+				/* 'downlatency' => gettext("High Latency"), */
+				$gwg['trigger'] = "downlatency";
+				break;
+			case "3":
+				/* '3' => gettext('Packet Loss or High latency') */
+				/* 'downlosslatency' => gettext("Packet Loss or High Latency")); */
+				$gwg['trigger'] = "downlosslatency";
+				break;
+		}
+	}
+}
+
+function upgrade_183_to_184() {
+	/* 'none' was kinda confusing and didnt really do none
+	 * now use the new 'automatic' mode if it was set to none. */
+	global $config;
+	if ($config['gateways']['defaultgw4'] === "-") {
+		$config['gateways']['defaultgw4'] = "";
+	}
+	if ($config['gateways']['defaultgw6'] === "-") {
+		$config['gateways']['defaultgw6'] = "";
+	}
+}
+
+// Migrate AutoConfigBackup package settings to integtrated ACB system
+// and remove package
+function upgrade_184_to_185() {
+	global $config;
+
+	if (is_array($config['installedpackages']['autoconfigbackup']['config'][0])) {
+		$acbpkg = &$config['installedpackages']['autoconfigbackup']['config'][0];
+
+		if (!is_array($config['system']['acb'])) {
+			$config['system']['acb'] = array();
+		}
+
+		$acb = &$config['system']['acb'];
+		$acb['enable'] = ($acbpkg['enable_acb'] != 'disabled') ?  'yes':'no';
+		$acb['gold_encryption_password'] = $acbpkg['crypto_password'];
+
+		// If no encryption password has been set up yet, we might as well import the "Gold" password
+		// The user can update it later
+		if (!isset($acb['encryption_password'])) {
+			$acb['encryption_password'] = $acbpkg['crypto_password'];
+		}
+
+		$acb['gold_password'] = $acbpkg['password'];
+		$acb['gold_username'] = $acbpkg['username'];
+
+		unset($config['installedpackages']['autoconfigbackup']['config']);
+	}
+}
+
+function upgrade_185_to_186() {
+	global $config;
+
+	/* FEC LAGG is deprecated, replace with loadbalance */
+	if (!function_exists("file_notice")) {
+		require_once("notices.inc");
+	}
+	if (is_array($config['laggs']) &&
+	    is_array($config['laggs']['lagg'])) {
+		foreach ($config['laggs']['lagg'] as &$lagg) {
+			if ($lagg['proto'] == 'fec') {
+				$lagg['proto'] = 'failover';
+				file_notice("Interfaces", sprintf(gettext("The FEC LAGG protocol is deprecated. The %s LAGG interface has been set to failover."), $lagg['laggif']));
 			}
 		}
 	}

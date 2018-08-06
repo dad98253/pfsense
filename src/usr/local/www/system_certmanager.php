@@ -3,7 +3,7 @@
  * system_certmanager.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2008 Shrew Soft Inc
  * All rights reserved.
  *
@@ -38,7 +38,7 @@ $cert_methods = array(
 	"sign" => gettext("Sign a Certificate Signing Request")
 );
 
-$cert_keylens = array("512", "1024", "2048", "3072", "4096", "7680", "8192", "15360", "16384");
+$cert_keylens = array("1024", "2048", "3072", "4096", "6144", "7680", "8192", "15360", "16384");
 $cert_types = array(
 	"server" => "Server Certificate",
 	"user" => "User Certificate");
@@ -103,6 +103,7 @@ if ($act == "new") {
 	$pconfig['digest_alg'] = "sha256";
 	$pconfig['csr_keylen'] = "2048";
 	$pconfig['csr_digest_alg'] = "sha256";
+	$pconfig['csrsign_digest_alg'] = "sha256";
 	$pconfig['type'] = "user";
 	$pconfig['lifetime'] = "3650";
 }
@@ -246,34 +247,22 @@ if ($_POST['save']) {
 
 		if ($pconfig['method'] == "internal") {
 			$reqdfields = explode(" ",
-				"descr caref keylen type lifetime dn_country dn_state dn_city ".
-				"dn_organization dn_email dn_commonname");
+				"descr caref keylen type lifetime dn_commonname");
 			$reqdfieldsn = array(
 				gettext("Descriptive name"),
 				gettext("Certificate authority"),
 				gettext("Key length"),
 				gettext("Certificate Type"),
 				gettext("Lifetime"),
-				gettext("Distinguished name Country Code"),
-				gettext("Distinguished name State or Province"),
-				gettext("Distinguished name City"),
-				gettext("Distinguished name Organization"),
-				gettext("Distinguished name Email Address"),
 				gettext("Distinguished name Common Name"));
 		}
 
 		if ($pconfig['method'] == "external") {
 			$reqdfields = explode(" ",
-				"descr csr_keylen csr_dn_country csr_dn_state csr_dn_city ".
-				"csr_dn_organization csr_dn_email csr_dn_commonname");
+				"descr csr_keylen csr_dn_commonname");
 			$reqdfieldsn = array(
 				gettext("Descriptive name"),
 				gettext("Key length"),
-				gettext("Distinguished name Country Code"),
-				gettext("Distinguished name State or Province"),
-				gettext("Distinguished name City"),
-				gettext("Distinguished name Organization"),
-				gettext("Distinguished name Email Address"),
 				gettext("Distinguished name Common Name"));
 		}
 
@@ -316,7 +305,7 @@ if ($_POST['save']) {
 			foreach ($altnames as $idx => $altname) {
 				switch ($altname['type']) {
 					case "DNS":
-						if (!is_hostname($altname['value'], true)) {
+						if (!is_hostname($altname['value'], true) || is_ipaddr($altname['value'])) {
 							array_push($input_errors, "DNS subjectAltName values must be valid hostnames, FQDNs or wildcard domains.");
 						}
 						break;
@@ -350,14 +339,6 @@ if ($_POST['save']) {
 				array_push($input_errors, "The field 'Descriptive Name' contains invalid characters.");
 			}
 
-			for ($i = 0; $i < count($reqdfields); $i++) {
-				if (preg_match('/email/', $reqdfields[$i])) { /* dn_email or csr_dn_name */
-					if (preg_match("/[\!\#\$\%\^\(\)\~\?\>\<\&\/\\\,\"\']/", $_POST[$reqdfields[$i]])) {
-						array_push($input_errors, gettext("The field 'Distinguished name Email Address' contains invalid characters."));
-					}
-				}
-			}
-
 			if (($pconfig['method'] != "external") && isset($_POST["keylen"]) && !in_array($_POST["keylen"], $cert_keylens)) {
 				array_push($input_errors, gettext("Please select a valid Key Length."));
 			}
@@ -369,6 +350,9 @@ if ($_POST['save']) {
 				array_push($input_errors, gettext("Please select a valid Key Length."));
 			}
 			if (($pconfig['method'] == "external") && !in_array($_POST["csr_digest_alg"], $openssl_digest_algs)) {
+				array_push($input_errors, gettext("Please select a valid Digest Algorithm."));
+			}
+			if (($pconfig['method'] == "sign") && !in_array($_POST["csrsign_digest_alg"], $openssl_digest_algs)) {
 				array_push($input_errors, gettext("Please select a valid Digest Algorithm."));
 			}
 		}
@@ -398,7 +382,7 @@ if ($_POST['save']) {
 					$altname_str = implode(",", $altnames_tmp);
 				}
 
-				$n509 = csr_sign($csr, $ca, $pconfig['csrsign_lifetime'], $pconfig['type'], $altname_str);
+				$n509 = csr_sign($csr, $ca, $pconfig['csrsign_lifetime'], $pconfig['type'], $altname_str, $pconfig['csrsign_digest_alg']);
 
 				if ($n509) {
 					// Gather the details required to save the new cert
@@ -435,17 +419,28 @@ if ($_POST['save']) {
 				}
 
 				if ($pconfig['method'] == "internal") {
-					$dn = array(
-						'countryName' => $pconfig['dn_country'],
-						'stateOrProvinceName' => cert_escape_x509_chars($pconfig['dn_state']),
-						'localityName' => cert_escape_x509_chars($pconfig['dn_city']),
-						'organizationName' => cert_escape_x509_chars($pconfig['dn_organization']),
-						'emailAddress' => cert_escape_x509_chars($pconfig['dn_email']),
-						'commonName' => cert_escape_x509_chars($pconfig['dn_commonname']));
+					$dn = array('commonName' => cert_escape_x509_chars($pconfig['dn_commonname']));
+					if (!empty($pconfig['dn_country'])) {
+						$dn['countryName'] = $pconfig['dn_country'];
+					}
+					if (!empty($pconfig['dn_state'])) {
+						$dn['stateOrProvinceName'] = cert_escape_x509_chars($pconfig['dn_state']);
+					}
+					if (!empty($pconfig['dn_city'])) {
+						$dn['localityName'] = cert_escape_x509_chars($pconfig['dn_city']);
+					}
+					if (!empty($pconfig['dn_organization'])) {
+						$dn['organizationName'] = cert_escape_x509_chars($pconfig['dn_organization']);
+					}
 					if (!empty($pconfig['dn_organizationalunit'])) {
 						$dn['organizationalUnitName'] = cert_escape_x509_chars($pconfig['dn_organizationalunit']);
 					}
-					$altnames_tmp = array(cert_add_altname_type($pconfig['dn_commonname']));
+
+					$altnames_tmp = array();
+					$cn_altname = cert_add_altname_type($pconfig['dn_commonname']);
+					if (!empty($cn_altname)) {
+						$altnames_tmp[] = $cn_altname;
+					}
 					if (count($altnames)) {
 						foreach ($altnames as $altname) {
 							// The CN is added as a SAN automatically, do not add it again.
@@ -469,18 +464,28 @@ if ($_POST['save']) {
 				}
 
 				if ($pconfig['method'] == "external") {
-					$dn = array(
-						'countryName' => $pconfig['csr_dn_country'],
-						'stateOrProvinceName' => cert_escape_x509_chars($pconfig['csr_dn_state']),
-						'localityName' => cert_escape_x509_chars($pconfig['csr_dn_city']),
-						'organizationName' => cert_escape_x509_chars($pconfig['csr_dn_organization']),
-						'emailAddress' => cert_escape_x509_chars($pconfig['csr_dn_email']),
-						'commonName' => cert_escape_x509_chars($pconfig['csr_dn_commonname']));
+					$dn = array('commonName' => cert_escape_x509_chars($pconfig['csr_dn_commonname']));
+					if (!empty($pconfig['csr_dn_country'])) {
+						$dn['countryName'] = $pconfig['csr_dn_country'];
+					}
+					if (!empty($pconfig['csr_dn_state'])) {
+						$dn['stateOrProvinceName'] = cert_escape_x509_chars($pconfig['csr_dn_state']);
+					}
+					if (!empty($pconfig['csr_dn_city'])) {
+						$dn['localityName'] = cert_escape_x509_chars($pconfig['csr_dn_city']);
+					}
+					if (!empty($pconfig['csr_dn_organization'])) {
+						$dn['organizationName'] = cert_escape_x509_chars($pconfig['csr_dn_organization']);
+					}
 					if (!empty($pconfig['csr_dn_organizationalunit'])) {
 						$dn['organizationalUnitName'] = cert_escape_x509_chars($pconfig['csr_dn_organizationalunit']);
 					}
 
-					$altnames_tmp = array(cert_add_altname_type($pconfig['csr_dn_commonname']));
+					$altnames_tmp = array();
+					$cn_altname = cert_add_altname_type($pconfig['csr_dn_commonname']);
+					if (!empty($cn_altname)) {
+						$altnames_tmp[] = $cn_altname;
+					}
 					if (count($altnames)) {
 						foreach ($altnames as $altname) {
 							// The CN is added as a SAN automatically, do not add it again.
@@ -608,6 +613,7 @@ display_top_tabs($tab_array);
 $dn_cc = array();
 if (file_exists("/etc/ca_countries")) {
 	$dn_cc_file=file("/etc/ca_countries");
+	$dn_cc[''] = gettext("None");
 	foreach ($dn_cc_file as $line) {
 		if (preg_match('/^(\S*)\s(.*)$/', $line, $matches)) {
 			$dn_cc[$matches[1]] = $matches[1];
@@ -718,8 +724,15 @@ if ($act == "new" || (($_POST['save'] == gettext("Save")) && $input_errors)) {
 		'csrsign_lifetime',
 		'*Certificate Lifetime (days)',
 		'number',
-		$pconfig['duration'] ? $pconfig['duration']:'3650'
+		$pconfig['csrsign_lifetime'] ? $pconfig['csrsign_lifetime']:'3650'
 	));
+	$section->addInput(new Form_Select(
+		'csrsign_digest_alg',
+		'*Digest Algorithm',
+		$pconfig['csrsign_digest_alg'],
+		array_combine($openssl_digest_algs, $openssl_digest_algs)
+	))->setHelp('NOTE: It is recommended to use an algorithm stronger than '.
+		'SHA1 when possible');
 
 	$form->add($section);
 
@@ -789,16 +802,29 @@ if ($act == "new" || (($_POST['save'] == gettext("Save")) && $input_errors)) {
 		$pconfig['lifetime']
 	));
 
+	$section->addInput(new Form_Input(
+		'dn_commonname',
+		'*Common Name',
+		'text',
+		$pconfig['dn_commonname'],
+		['placeholder' => 'e.g. www.example.com']
+	));
+
+	$section->addInput(new Form_StaticText(
+		null,
+		gettext('The following certificate subject components are optional and may be left blank.')
+	));
+
 	$section->addInput(new Form_Select(
 		'dn_country',
-		'*Country Code',
+		'Country Code',
 		$pconfig['dn_country'],
 		$dn_cc
 	));
 
 	$section->addInput(new Form_Input(
 		'dn_state',
-		'*State or Province',
+		'State or Province',
 		'text',
 		$pconfig['dn_state'],
 		['placeholder' => 'e.g. Texas']
@@ -806,7 +832,7 @@ if ($act == "new" || (($_POST['save'] == gettext("Save")) && $input_errors)) {
 
 	$section->addInput(new Form_Input(
 		'dn_city',
-		'*City',
+		'City',
 		'text',
 		$pconfig['dn_city'],
 		['placeholder' => 'e.g. Austin']
@@ -814,7 +840,7 @@ if ($act == "new" || (($_POST['save'] == gettext("Save")) && $input_errors)) {
 
 	$section->addInput(new Form_Input(
 		'dn_organization',
-		'*Organization',
+		'Organization',
 		'text',
 		$pconfig['dn_organization'],
 		['placeholder' => 'e.g. My Company Inc']
@@ -826,22 +852,6 @@ if ($act == "new" || (($_POST['save'] == gettext("Save")) && $input_errors)) {
 		'text',
 		$pconfig['dn_organizationalunit'],
 		['placeholder' => 'e.g. My Department Name (optional)']
-	));
-
-	$section->addInput(new Form_Input(
-		'dn_email',
-		'*Email Address',
-		'text',
-		$pconfig['dn_email'],
-		['placeholder' => 'e.g. admin@mycompany.com']
-	));
-
-	$section->addInput(new Form_Input(
-		'dn_commonname',
-		'*Common Name',
-		'text',
-		$pconfig['dn_commonname'],
-		['placeholder' => 'e.g. www.example.com']
 	));
 
 	$form->add($section);
@@ -863,16 +873,29 @@ if ($act == "new" || (($_POST['save'] == gettext("Save")) && $input_errors)) {
 	))->setHelp('NOTE: It is recommended to use an algorithm stronger than '.
 		'SHA1 when possible');
 
+	$section->addInput(new Form_Input(
+		'csr_dn_commonname',
+		'*Common Name',
+		'text',
+		$pconfig['csr_dn_commonname'],
+		['placeholder' => 'e.g. internal-ca']
+	));
+
+	$section->addInput(new Form_StaticText(
+		null,
+		gettext('The following certificate subject components are optional and may be left blank.')
+	));
+
 	$section->addInput(new Form_Select(
 		'csr_dn_country',
-		'*Country Code',
+		'Country Code',
 		$pconfig['csr_dn_country'],
 		$dn_cc
 	));
 
 	$section->addInput(new Form_Input(
 		'csr_dn_state',
-		'*State or Province',
+		'State or Province',
 		'text',
 		$pconfig['csr_dn_state'],
 		['placeholder' => 'e.g. Texas']
@@ -880,7 +903,7 @@ if ($act == "new" || (($_POST['save'] == gettext("Save")) && $input_errors)) {
 
 	$section->addInput(new Form_Input(
 		'csr_dn_city',
-		'*City',
+		'City',
 		'text',
 		$pconfig['csr_dn_city'],
 		['placeholder' => 'e.g. Austin']
@@ -888,7 +911,7 @@ if ($act == "new" || (($_POST['save'] == gettext("Save")) && $input_errors)) {
 
 	$section->addInput(new Form_Input(
 		'csr_dn_organization',
-		'*Organization',
+		'Organization',
 		'text',
 		$pconfig['csr_dn_organization'],
 		['placeholder' => 'e.g. My Company Inc']
@@ -900,22 +923,6 @@ if ($act == "new" || (($_POST['save'] == gettext("Save")) && $input_errors)) {
 		'text',
 		$pconfig['csr_dn_organizationalunit'],
 		['placeholder' => 'e.g. My Department Name (optional)']
-	));
-
-	$section->addInput(new Form_Input(
-		'csr_dn_email',
-		'*Email Address',
-		'text',
-		$pconfig['csr_dn_email'],
-		['placeholder' => 'e.g. admin@mycompany.com']
-	));
-
-	$section->addInput(new Form_Input(
-		'csr_dn_commonname',
-		'*Common Name',
-		'text',
-		$pconfig['csr_dn_commonname'],
-		['placeholder' => 'e.g. internal-ca']
 	));
 
 	$form->add($section);
@@ -1122,7 +1129,7 @@ $certificates_used_by_packages = pkg_call_plugins('plugin_certificates', $plugin
 $i = 0;
 foreach ($a_cert as $i => $cert):
 	$name = htmlspecialchars($cert['descr']);
-
+	$sans = array();
 	if ($cert['crt']) {
 		$subj = cert_get_subject($cert['crt']);
 		$issuer = cert_get_issuer($cert['crt']);
@@ -1173,6 +1180,18 @@ foreach ($a_cert as $i => $cert):
 						<?=$subj?>
 						<?php
 						$certextinfo = "";
+						$certserial = cert_get_serial($cert['crt']);
+						if (!empty($certserial)) {
+							$certextinfo .= '<b>' . gettext("Serial: ") . '</b> ';
+							$certextinfo .= htmlspecialchars(cert_escape_x509_chars($certserial, true));
+							$certextinfo .= '<br/>';
+						}
+						$certsig = cert_get_sigtype($cert['crt']);
+						if (is_array($certsig) && !empty($certsig) && !empty($certsig['shortname'])) {
+							$certextinfo .= '<b>' . gettext("Signature Digest: ") . '</b> ';
+							$certextinfo .= htmlspecialchars(cert_escape_x509_chars($certsig['shortname'], true));
+							$certextinfo .= '<br/>';
+						}
 						if (is_array($sans) && !empty($sans)) {
 							$certextinfo .= '<b>' . gettext("SAN: ") . '</b> ';
 							$certextinfo .= htmlspecialchars(implode(', ', cert_escape_x509_chars($sans, true)));
@@ -1186,6 +1205,11 @@ foreach ($a_cert as $i => $cert):
 						if (is_array($purpose) && !empty($purpose['eku'])) {
 							$certextinfo .= '<b>' . gettext("EKU: ") . '</b> ';
 							$certextinfo .= htmlspecialchars(implode(', ', $purpose['eku']));
+							$certextinfo .= '<br/>';
+						}
+						if (cert_get_ocspstaple($cert['crt'])) {
+							$certextinfo .= '<b>' . gettext("OCSP: ") . '</b> ';
+							$certextinfo .= gettext("Must Staple");
 						}
 						?>
 						<?php if (!empty($certextinfo)): ?>
@@ -1287,7 +1311,6 @@ events.push(function() {
 					$('#dn_state').val(<?=json_encode(cert_escape_x509_chars($subject[1]['v'], true));?>);
 					$('#dn_city').val(<?=json_encode(cert_escape_x509_chars($subject[2]['v'], true));?>);
 					$('#dn_organization').val(<?=json_encode(cert_escape_x509_chars($subject[3]['v'], true));?>);
-					$('#dn_email').val(<?=json_encode(cert_escape_x509_chars($subject[4]['v'], true));?>);
 					$('#dn_organizationalunit').val(<?=json_encode(cert_escape_x509_chars($subject[6]['v'], true));?>);
 					break;
 <?php

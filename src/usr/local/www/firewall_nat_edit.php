@@ -3,7 +3,7 @@
  * firewall_nat_edit.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -51,34 +51,6 @@ if (!is_array($config['nat']['rule'])) {
 }
 
 $a_nat = &$config['nat']['rule'];
-
-$iflist = get_configured_interface_with_descr(true);
-
-foreach ($iflist as $if => $ifdesc) {
-	if (have_ruleint_access($if)) {
-		$interfaces[$if] = $ifdesc;
-	}
-}
-
-if ($config['l2tp']['mode'] == "server") {
-	if (have_ruleint_access("l2tp")) {
-		$interfaces['l2tp'] = gettext("L2TP VPN");
-	}
-}
-
-if (is_pppoe_server_enabled() && have_ruleint_access("pppoe")) {
-	$interfaces['pppoe'] = gettext("PPPoE Server");
-}
-
-/* add ipsec interfaces */
-if (ipsec_enabled() && have_ruleint_access("enc0")) {
-	$interfaces["enc0"] = gettext("IPsec");
-}
-
-/* add openvpn/tun interfaces */
-if ($config['openvpn']["openvpn-server"] || $config['openvpn']["openvpn-client"]) {
-	$interfaces["openvpn"] = gettext("OpenVPN");
-}
 
 if (isset($_REQUEST['id']) && is_numericint($_REQUEST['id'])) {
 	$id = $_REQUEST['id'];
@@ -141,7 +113,7 @@ if (isset($_REQUEST['dup']) && is_numericint($_REQUEST['dup'])) {
  */
 unset($input_errors);
 
-foreach ($_REQUEST as $key => $value) {
+foreach ($_POST as $key => $value) {
 	if ($key == 'descr') {
 		continue;
 	}
@@ -155,7 +127,6 @@ foreach ($_REQUEST as $key => $value) {
 }
 
 if ($_POST['save']) {
-
 	if (strtoupper($_POST['proto']) == "TCP" || strtoupper($_POST['proto']) == "UDP" || strtoupper($_POST['proto']) == "TCP/UDP") {
 		if ($_POST['srcbeginport_cust'] && !$_POST['srcbeginport']) {
 			$_POST['srcbeginport'] = trim($_POST['srcbeginport_cust']);
@@ -279,7 +250,7 @@ if ($_POST['save']) {
 		$_POST['localip'] = trim($_POST['localip']);
 	}
 
-	if (!array_key_exists($_POST['interface'], $interfaces)) {
+	if (!array_key_exists($_POST['interface'], create_interface_list())) {
 		$input_errors[] = gettext("The submitted interface does not exist.");
 	}
 
@@ -353,7 +324,7 @@ if ($_POST['save']) {
 	}
 
 	if (!$input_errors) {
-		if (!isset($_POST['nordr']) && ($_POST['dstendport'] - $_POST['dstbeginport'] + $_POST['localbeginport']) > 65535) {
+		if (!isset($_POST['nordr']) && ((int) $_POST['dstendport'] - (int) $_POST['dstbeginport'] + (int) $_POST['localbeginport']) > 65535) {
 			$input_errors[] = gettext("The target port range must be an integer between 1 and 65535.");
 		}
 	}
@@ -491,7 +462,7 @@ if ($_POST['save']) {
 			}
 
 			$dstpfrom = $_POST['localbeginport'];
-			$dstpto = $dstpfrom + $_POST['dstendport'] - $_POST['dstbeginport'];
+			$dstpto = (int) $dstpfrom + (int) $_POST['dstendport'] - (int) $_POST['dstbeginport'];
 
 			if ($dstpfrom == $dstpto) {
 				$filterent['destination']['port'] = $dstpfrom;
@@ -620,7 +591,7 @@ function build_dsttype_list() {
 			$list[$ifent . 'ip'] = $ifdesc . ' address';
 		}
 	}
-	
+
 	//Temporary array so we can sort IPs
 	$templist = array();
 	if (is_array($config['virtualip']['vip'])) {
@@ -647,7 +618,7 @@ function build_dsttype_list() {
 			}
 		}
 	}
-	
+
 	//Sort temp IP array and append onto main array
 	asort($templist);
 	$list = array_merge($list, $templist);
@@ -703,7 +674,7 @@ $section->addInput(new Form_Select(
 	'interface',
 	'*Interface',
 	$pconfig['interface'],
-	$interfaces
+	filter_get_interface_list()
 ))->setHelp('Choose which interface this rule applies to. In most cases "WAN" is specified.');
 
 $protocols = "TCP UDP TCP/UDP ICMP ESP AH GRE IPV6 IGMP PIM OSPF";

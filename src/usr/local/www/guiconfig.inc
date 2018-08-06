@@ -3,7 +3,7 @@
  * guiconfig.inc
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -25,6 +25,7 @@
 
 /* Include authentication routines */
 /* THIS MUST BE ABOVE ALL OTHER CODE */
+header("X-Frame-Options: SAMEORIGIN");
 include_once('phpsessionmanager.inc');
 if (!$nocsrf) {
 	function csrf_startup() {
@@ -47,7 +48,6 @@ if (!$omit_nocacheheaders) {
 	header("Pragma: no-cache");
 }
 
-header("X-Frame-Options: SAMEORIGIN");
 require_once("authgui.inc");
 
 /* parse the configuration and include all configuration functions */
@@ -314,7 +314,7 @@ function sprint_info_box($msg, $class="alert-warning", $btnname = "close", $btnt
 
 		$msg .= '<form method="post" class="pull-right"><button type="submit" class="btn btn-' . $btnclass . '" name="'. $btnname . '" value="' . $btntext . '">' . $btnicon . $btntext . '</button>';
 
-		if ($_POST['if']) {
+		if ( isset($_POST['if']) && !empty($_POST['if'])) {
 			$msg .= "<input type=\"hidden\" name=\"if\" value=\"" . htmlspecialchars($_POST['if']) . "\" />";
 		}
 
@@ -389,7 +389,7 @@ function get_std_save_message($retval) {
 		$to_return = gettext("The changes have been applied successfully.");
 	} else {
 		// non-zero means there was some problem
-		$to_return = sprintf(gettext('There was a problem applying the changes. See the %1$sSystem Logs%2$s.'), '<a href=\"status_logs.php\">', '</a>');
+		$to_return = sprintf(gettext('There was a problem applying the changes. See the %1$sSystem Logs%2$s.'), '<a href="status_logs.php">', '</a>');
 	}
 	foreach ($filter_pages as $fp) {
 		if (stristr($_SERVER['SCRIPT_FILENAME'], $fp)) {
@@ -535,8 +535,13 @@ function gentitle($title) {
 }
 
 function genhtmltitle($title, $links=true) {
-
-	$num_crumbs = count($title);
+	if (is_array($title)) {
+		$num_crumbs = count($title);
+	} else if ($title != NULL) {
+		$num_crumbs = 1;
+	} else {
+		$num_crumbs = 0;
+	}
 
 	// If the array contains only one element, there are no breadcrumbs, so don't
 	// add anything else
@@ -825,7 +830,12 @@ function pconfig_to_address(&$adr, $padr, $pmask, $pnot = false, $pbeginport = 0
 		}
 	}
 
-	if (is_alias($pbeginport)) {
+	/*
+	 * If the port is still unset, then it must not be numeric, but could
+	 * be an alias or a well-known/registered service.
+	 * See https://redmine.pfsense.org/issues/8410
+	 */
+	if (!isset($adr['port']) && is_port_or_alias($pbeginport)) {
 		$adr['port'] = $pbeginport;
 	}
 }
@@ -1039,7 +1049,7 @@ function display_top_tabs(& $tab_array, $no_drop_down = false, $type = 'pills', 
 	}
 
 	if ($tab_array_char_limit == '') {
-		$tab_array_char_limit = 92;
+		$tab_array_char_limit = 256;
 	}
 
 	foreach ($tab_array as $tab_id => $ta) {
