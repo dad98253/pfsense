@@ -3,7 +3,9 @@
  * firewall_rules.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -108,14 +110,7 @@ function delete_nat_association($id) {
 	}
 }
 
-if (!is_array($config['filter'])) {
-	$config['filter'] = array();
-}
-
-if (!is_array($config['filter']['rule'])) {
-	$config['filter']['rule'] = array();
-}
-
+init_config_arr(array('filter', 'rule'));
 filter_rules_sort();
 $a_filter = &$config['filter']['rule'];
 
@@ -150,6 +145,7 @@ if ($_POST['act'] == "del") {
 		unset($a_filter[$_POST['id']]);
 
 		// Update the separators
+		init_config_arr(array('filter', 'separator', strtolower($if)));
 		$a_separators = &$config['filter']['separator'][strtolower($if)];
 		$ridx = ifridx($if, $_POST['id']);	// get rule index within interface
 		$mvnrows = -1;
@@ -174,6 +170,7 @@ if (isset($_POST['del_x'])) {
 	$deleted = false;
 
 	if (is_array($_POST['rule']) && count($_POST['rule'])) {
+		init_config_arr(array('filter', 'separator', strtolower($if)));
 		$a_separators = &$config['filter']['separator'][strtolower($if)];
 		$num_deleted = 0;
 
@@ -328,11 +325,23 @@ if (isset($config['interfaces'][$if]['blockbogons'])) {
 	$showblockbogons = true;
 }
 
+if (isset($config['system']['webgui']['roworderdragging'])) {
+	$rules_header_text = gettext("Rules");
+} else {
+	$rules_header_text = gettext("Rules (Drag to Change Order)");
+}
+
 /* Load the counter data of each pf rule. */
 $rulescnt = pfSense_get_pf_rules();
 
 // Update this if you add or remove columns!
 $columns_in_table = 13;
+
+/* Floating rules tab has one extra column
+ * https://redmine.pfsense.org/issues/10667 */
+if ($if == "FloatingRules") {
+	$columns_in_table++;
+}
 
 ?>
 <!-- Allow table to scroll when dragging outside of the display window -->
@@ -347,14 +356,21 @@ $columns_in_table = 13;
 <form method="post">
 	<input name="if" id="if" type="hidden" value="<?=$if?>" />
 	<div class="panel panel-default">
-		<div class="panel-heading"><h2 class="panel-title"><?=gettext("Rules (Drag to Change Order)")?></h2></div>
+		<div class="panel-heading"><h2 class="panel-title"><?=$rules_header_text?></h2></div>
 		<div id="mainarea" class="table-responsive panel-body">
 			<table id="ruletable" class="table table-hover table-striped table-condensed" style="overflow-x: 'visible'">
 				<thead>
 					<tr>
-						<th><!-- checkbox --></th>
+						<th><input type="checkbox" id="selectAll" name="selectAll" /></th>
 						<th><!-- status icons --></th>
 						<th><?=gettext("States")?></th>
+				<?php
+					if ('FloatingRules' == $if) {
+				?>
+						<th><?=gettext("Interfaces")?></th>
+				<?php
+					}
+				?>
 						<th><?=gettext("Protocol")?></th>
 						<th><?=gettext("Source")?></th>
 						<th><?=gettext("Port")?></th>
@@ -499,14 +515,8 @@ foreach ($a_filter as $filteri => $filterent):
 			pprint_port($filterent['destination']['port'])
 		);
 
-		if (!is_array($config['schedules'])) {
-			$config['schedules'] = array();
-		}
-
-		if (!is_array($config['schedules']['schedule'])) {
-			$config['schedules']['schedule'] = array();
-		}
 		//build Schedule popup box
+		init_config_arr(array('schedules', 'schedule'));
 		$a_schedules = &$config['schedules']['schedule'];
 		$schedule_span_begin = "";
 		$schedule_span_end = "";
@@ -518,7 +528,8 @@ foreach ($a_filter as $filteri => $filterent):
 		if ($config['schedules']['schedule'] != "" && is_array($config['schedules']['schedule'])) {
 			$idx = 0;
 			foreach ($a_schedules as $schedule) {
-				if ($schedule['name'] == $filterent['sched']) {
+				if (!empty($schedule['name']) &&
+				    $schedule['name'] == $filterent['sched']) {
 					$schedstatus = filter_get_time_based_rule_status($schedule);
 
 					foreach ($schedule['timerange'] as $timerange) {
@@ -647,7 +658,51 @@ foreach ($a_filter as $filteri => $filterent):
 		}
 	?>
 				<td><?php print_states(intval($filterent['tracker'])); ?></td>
-				<td>
+	<?php
+		if ($if == 'FloatingRules') {
+	?>
+			<td onclick="fr_toggle(<?=$nrules;?>)" id="frd<?=$nrules;?>" ondblclick="document.location='firewall_rules_edit.php?id=<?=$i;?>';">
+	<?php
+			if (isset($filterent['interface'])) {
+				$selected_interfaces = explode(',', $filterent['interface']);
+				unset($selected_descs);
+				foreach ($selected_interfaces as $interface) {
+					if (isset($ifdescs[$interface])) {
+						$selected_descs[] = $ifdescs[$interface];
+					} else {
+						switch ($interface) {
+						case 'l2tp':
+							if ($config['l2tp']['mode'] == 'server')
+								$selected_descs[] = 'L2TP VPN';
+							break;
+						case 'pppoe':
+							if (is_pppoe_server_enabled())
+								$selected_descs[] = 'PPPoE Server';
+							break;
+						case 'enc0':
+							if (ipsec_enabled())
+								$selected_descs[] = 'IPsec';
+							break;
+						case 'openvpn':
+							if  ($config['openvpn']['openvpn-server'] || $config['openvpn']['openvpn-client'])
+								$selected_descs[] = 'OpenVPN';
+							break;
+						default:
+							$selected_descs[] = $interface;
+							break;
+						}
+					}
+				}
+				if (!empty($selected_descs)) {
+					echo implode('<br/>', $selected_descs);
+				}
+			}
+	?>
+			</td>
+	<?php
+		}
+	?>
+			<td>
 	<?php
 		if (isset($filterent['ipprotocol'])) {
 			switch ($filterent['ipprotocol']) {
@@ -723,11 +778,17 @@ foreach ($a_filter as $filteri => $filterent):
 							<?php endif; ?>
 						</td>
 						<td>
-							<?php if (isset($config['interfaces'][$filterent['gateway']]['descr'])):?>
-								<?=str_replace('_', '_<wbr>', htmlspecialchars($config['interfaces'][$filterent['gateway']]['descr']))?>
+							<?php if (isset($filterent['gateway'])): ?>
+								<span data-toggle="popover" data-trigger="hover focus" title="<?=gettext('Gateways details')?>" data-content="<?=gateway_info_popup($filterent['gateway'])?>" data-html="true">
 							<?php else: ?>
-								<?=htmlspecialchars(pprint_port($filterent['gateway']))?>
+								<span>
 							<?php endif; ?>
+								<?php if (isset($config['interfaces'][$filterent['gateway']]['descr'])): ?>
+									<?=str_replace('_', '_<wbr>', htmlspecialchars($config['interfaces'][$filterent['gateway']]['descr']))?>
+								<?php else: ?>
+									<?=htmlspecialchars(pprint_port($filterent['gateway']))?>
+								<?php endif; ?>
+							</span>
 						</td>
 						<td>
 							<?php
@@ -983,6 +1044,13 @@ events.push(function() {
 		} else {
 			$('[id^=Xmove_]').attr("title", "<?=$XmoveTitle?>");
 		}
+	});
+
+	$('#selectAll').click(function() {
+		var checkedStatus = this.checked;
+		$('#ruletable tbody tr').find('td:first :checkbox').each(function() {
+		$(this).prop('checked', checkedStatus);
+		});
 	});
 });
 //]]>

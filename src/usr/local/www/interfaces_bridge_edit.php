@@ -3,7 +3,9 @@
  * interfaces_bridge_edit.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -27,14 +29,6 @@
 ##|-PRIV
 
 require_once("guiconfig.inc");
-
-if (!is_array($config['bridges'])) {
-	$config['bridges'] = array();
-}
-
-if (!is_array($config['bridges']['bridged'])) {
-	$config['bridges']['bridged'] = array();
-}
 
 function is_aoadv_used($pconfig) {
 	if (($pconfig['static'] !="") ||
@@ -60,6 +54,7 @@ function is_aoadv_used($pconfig) {
 	return false;
 }
 
+init_config_arr(array('bridges', 'bridged'));
 $a_bridges = &$config['bridges']['bridged'];
 
 $ifacelist = get_configured_interface_with_descr();
@@ -344,14 +339,11 @@ if ($_POST['save']) {
 		}
 
 		$bridge['bridgeif'] = $_POST['bridgeif'];
+
 		interface_bridge_configure($bridge);
 		if ($bridge['bridgeif'] == "" || !stristr($bridge['bridgeif'], "bridge")) {
 			$input_errors[] = gettext("Error occurred creating interface, please retry.");
 		} else {
-
-			// $bridge[bridgeif] is getting some invalid characters that need to be
-			// taken out for it to parse as xml. This hack should work until the actual bug is found.
-			$bridge['bridgeif'] = preg_replace('/[^A-Za-z0-9\-]/', '', $bridge['bridgeif']); // Removes special chars.
 
 			if (isset($id) && $a_bridges[$id]) {
 				$a_bridges[$id] = $bridge;
@@ -635,7 +627,7 @@ foreach ($ifacelist as $ifn => $ifdescr) {
 	$i++;
 }
 
-$section->addInput(new Form_Input(
+$form->addGlobal(new Form_Input(
 	'bridgeif',
 	null,
 	'hidden',
@@ -643,7 +635,7 @@ $section->addInput(new Form_Input(
 ));
 
 if (isset($id) && $a_bridges[$id]) {
-	$section->addInput(new Form_Input(
+	$form->addGlobal(new Form_Input(
 		'id',
 		null,
 		'hidden',

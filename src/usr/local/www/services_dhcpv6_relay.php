@@ -3,7 +3,9 @@
  * services_dhcpv6_relay.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2003-2004 Justin Ellison <justin@techadvise.com>
  * Copyright (c) 2010 Seth Mos
  * All rights reserved.
@@ -47,7 +49,8 @@ $iflist = array_intersect_key(
 		array_filter(
 			array_keys(get_configured_interface_with_descr()),
 			function($if) {
-				return is_ipaddrv6(get_interface_ipv6($if));
+				return (get_interface_ipv6($if) &&
+				    !is_pseudo_interface(convert_friendly_interface_to_real_interface_name($if)));
 			}
 		)
 	)
@@ -108,6 +111,7 @@ if ($_POST) {
 	$pconfig['server'] = $svrlist;
 
 	if (!$input_errors) {
+		init_config_arr(array('dhcrelay6'));
 		$config['dhcrelay6']['enable'] = $_POST['enable'] ? true : false;
 		$config['dhcrelay6']['interface'] = implode(",", $_POST['interface']);
 		$config['dhcrelay6']['agentoption'] = $_POST['agentoption'] ? true : false;

@@ -3,7 +3,9 @@
  * system_authservers.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2008 Shrew Soft Inc
  * All rights reserved.
  *
@@ -105,12 +107,8 @@ if (!is_array($config['system']['authserver'])) {
 
 $a_server = array_values(auth_get_authserver_list());
 
-
-if (!is_array($config['ca'])) {
-	$config['ca'] = array();
-}
-
-$a_ca =& $config['ca'];
+init_config_arr(array('ca'));
+$a_ca = &$config['ca'];
 
 $act = $_REQUEST['act'];
 
@@ -163,7 +161,9 @@ if ($act == "edit") {
 			$pconfig['ldap_attr_groupobj'] = $a_server[$id]['ldap_attr_groupobj'];
 			$pconfig['ldap_utf8'] = isset($a_server[$id]['ldap_utf8']);
 			$pconfig['ldap_nostrip_at'] = isset($a_server[$id]['ldap_nostrip_at']);
+			$pconfig['ldap_allow_unauthenticated'] = isset($a_server[$id]['ldap_allow_unauthenticated']);
 			$pconfig['ldap_rfc2307'] = isset($a_server[$id]['ldap_rfc2307']);
+			$pconfig['ldap_rfc2307_userdn'] = isset($a_server[$id]['ldap_rfc2307_userdn']);
 
 			if (!$pconfig['ldap_binddn'] || !$pconfig['ldap_bindpw']) {
 				$pconfig['ldap_anon'] = true;
@@ -173,6 +173,7 @@ if ($act == "edit") {
 		if ($pconfig['type'] == "radius") {
 			$pconfig['radius_protocol'] = $a_server[$id]['radius_protocol'];
 			$pconfig['radius_host'] = $a_server[$id]['host'];
+			$pconfig['radius_nasip_attribute'] = $a_server[$id]['radius_nasip_attribute'];
 			$pconfig['radius_auth_port'] = $a_server[$id]['radius_auth_port'];
 			$pconfig['radius_acct_port'] = $a_server[$id]['radius_acct_port'];
 			$pconfig['radius_secret'] = $a_server[$id]['radius_secret'];
@@ -278,6 +279,11 @@ if ($_POST['save']) {
 		$input_errors[] = gettext("An authentication server with the same name already exists.");
 	}
 
+	if (isset($id) && $config['system']['authserver'][$id] &&
+	   ($config['system']['authserver'][$id]['name'] != $pconfig['name'])) {
+		$input_errors[] = gettext("The name of an authentication server cannot be changed.");
+	}
+
 	if (($pconfig['type'] == "ldap") || ($pconfig['type'] == "radius")) {
 		$to_field = "{$pconfig['type']}_timeout";
 		if (isset($_POST[$to_field]) && !empty($_POST[$to_field]) && (!is_numeric($_POST[$to_field]) || (is_numeric($_POST[$to_field]) && ($_POST[$to_field] <= 0)))) {
@@ -332,10 +338,20 @@ if ($_POST['save']) {
 			} else {
 				unset($server['ldap_nostrip_at']);
 			}
+			if ($pconfig['ldap_allow_unauthenticated'] == "yes") {
+				$server['ldap_allow_unauthenticated'] = true;
+			} else {
+				unset($server['ldap_allow_unauthenticated']);
+			}
 			if ($pconfig['ldap_rfc2307'] == "yes") {
 				$server['ldap_rfc2307'] = true;
 			} else {
 				unset($server['ldap_rfc2307']);
+			}
+			if ($pconfig['ldap_rfc2307_userdn'] == "yes") {
+				$server['ldap_rfc2307_userdn'] = true;
+			} else {
+				unset($server['ldap_rfc2307_userdn']);
 			}
 
 
@@ -358,6 +374,7 @@ if ($_POST['save']) {
 
 			$server['radius_protocol'] = $pconfig['radius_protocol'];
 			$server['host'] = $pconfig['radius_host'];
+			$server['radius_nasip_attribute'] = $pconfig['radius_nasip_attribute'];
 
 			if ($pconfig['radius_secret']) {
 				$server['radius_secret'] = $pconfig['radius_secret'];
@@ -397,6 +414,38 @@ if ($_POST['save']) {
 	}
 }
 
+function build_radiusnas_list() {
+	global $config;
+	$list = array();
+
+	$iflist = get_configured_interface_with_descr();
+	foreach ($iflist as $ifdesc => $ifdescr) {
+		$ipaddr = get_interface_ip($ifdesc);
+		if (is_ipaddr($ipaddr)) {
+			$list[$ifdesc] = $ifdescr . ' - ' . $ipaddr;
+		}
+	}
+
+	if (is_array($config['virtualip']['vip'])) {
+		foreach ($config['virtualip']['vip'] as $sn) {
+			if ($sn['mode'] == "proxyarp" && $sn['type'] == "network") {
+				$start = ip2long32(gen_subnet($sn['subnet'], $sn['subnet_bits']));
+				$end = ip2long32(gen_subnet_max($sn['subnet'], $sn['subnet_bits']));
+				$len = $end - $start;
+
+				for ($i = 0; $i <= $len; $i++) {
+					$snip = long2ip32($start+$i);
+					$list[$snip] = $sn['descr'] . ' - ' . $snip;
+				}
+			} else {
+				$list[$sn['subnet']] = $sn['descr'] . ' - ' . $sn['subnet'];
+			}
+		}
+	}
+
+	return($list);
+}
+
 // On error, restore the form contents so the user doesn't have to re-enter too much
 if ($_POST && $input_errors) {
 	$pconfig = $_POST;
@@ -423,7 +472,11 @@ if ($savemsg) {
 }
 
 $tab_array = array();
-$tab_array[] = array(gettext("Users"), false, "system_usermanager.php");
+if (!isAllowedPage("system_usermanager.php")) {
+       $tab_array[] = array(gettext("User Password"), false, "system_usermanager_passwordmg.php");
+} else {
+       $tab_array[] = array(gettext("Users"), false, "system_usermanager.php");
+}
 $tab_array[] = array(gettext("Groups"), false, "system_groupmanager.php");
 $tab_array[] = array(gettext("Settings"), false, "system_usermanager_settings.php");
 $tab_array[] = array(gettext("Authentication Servers"), true, "system_authservers.php");
@@ -515,8 +568,8 @@ $section->addInput(new Form_Input(
 	'*Hostname or IP address',
 	'text',
 	$pconfig['ldap_host']
-))->setHelp('NOTE: When using SSL or STARTTLS, this hostname MUST match the Common Name '.
-	'(CN) of the LDAP server\'s SSL Certificate.');
+))->setHelp('NOTE: When using SSL/TLS or STARTTLS, this hostname MUST match a Subject '.
+	'Alternative Name (SAN) or the Common Name (CN) of the LDAP server SSL/TLS Certificate.');
 
 $section->addInput(new Form_Input(
 	'ldap_port',
@@ -550,9 +603,9 @@ else
 		'Peer Certificate Authority',
 		$pconfig['ldap_caref'],
 		$ldapCaRef
-	))->setHelp('This option is used if \'SSL Encrypted\' '.
-		'or \'TCP - STARTTLS\' options are chosen. '.
-		'It must match with the CA in the AD otherwise problems will arise.');
+	))->setHelp('This CA is used to validate the LDAP server certificate when '.
+		'\'SSL/TLS Encrypted\' or \'STARTTLS Encrypted\' Transport is active. '.
+		'This CA must match the CA used by the LDAP server.');
 }
 
 $section->addInput(new Form_Select(
@@ -626,7 +679,7 @@ $group->add(new Form_Input(
 	'Query',
 	'text',
 	$pconfig['ldap_extended_query']
-))->setHelp('Example: memberOf=CN=Groupname,OU=MyGroups,DC=example,DC=com');
+))->setHelp('Example (MSAD): memberOf=CN=Groupname,OU=MyGroups,DC=example,DC=com<br>Example (2307): |(&(objectClass=posixGroup)(cn=Groupname)(memberUid=*))(&(objectClass=posixGroup)(cn=anotherGroup)(memberUid=*))');
 
 $section->add($group);
 
@@ -700,6 +753,18 @@ $section->addInput(new Form_Checkbox(
 	'object rather than using groups listed on user object. Leave unchecked '.
 	'for Active Directory style group membership (RFC 2307bis).');
 
+$group = new Form_Group('RFC 2307 User DN');
+$group->addClass('ldap_rfc2307_userdn');
+
+$group->add(new Form_Checkbox(
+	'ldap_rfc2307_userdn',
+	'RFC 2307 user DN',
+	'RFC 2307 Use DN for username search.',
+	$pconfig['ldap_rfc2307_userdn']
+))->setHelp('Use DN for username search, i.e. "(member=CN=Username,CN=Users,DC=example,DC=com)".');
+
+$section->add($group);
+
 $section->addInput(new Form_Input(
 	'ldap_attr_groupobj',
 	'Group Object Class',
@@ -723,6 +788,14 @@ $section->addInput(new Form_Checkbox(
 	'Do not strip away parts of the username after the @ symbol',
 	$pconfig['ldap_nostrip_at']
 ))->setHelp('e.g. user@host becomes user when unchecked.');
+
+$section->addInput(new Form_Checkbox(
+	'ldap_allow_unauthenticated',
+	'Allow unauthenticated bind',
+	'Allow unauthenticated bind',
+	$pconfig['ldap_allow_unauthenticated']
+))->setHelp('Unauthenticated binds are bind with an existing login but with an empty password. '.
+         'Some LDAP servers (Microsoft AD) allow this type of bind without any possiblity to disable it.');
 
 $form->add($section);
 
@@ -783,9 +856,17 @@ $section->addInput(new Form_Input(
 	'authentication system, increase this timeout to account for how long it will '.
 	'take the user to receive and enter a token.');
 
+$section->addInput(new Form_Select(
+	'radius_nasip_attribute',
+	'RADIUS NAS IP Attribute',
+	$pconfig['radius_nasip_attribute'],
+	build_radiusnas_list()
+))->setHelp('Enter the IP to use for the "NAS-IP-Address" attribute during RADIUS Acccess-Requests.<br />'.
+			'Please note that this choice won\'t change the interface used for contacting the RADIUS server.');
+
 if (isset($id) && $a_server[$id])
 {
-	$section->addInput(new Form_Input(
+	$form->addGlobal(new Form_Input(
 		'id',
 		null,
 		'hidden',
@@ -931,6 +1012,7 @@ events.push(function() {
 				$('#ldap_attr_user').val("<?=$tmpldata['attr_user'];?>");
 				$('#ldap_attr_group').val("<?=$tmpldata['attr_group'];?>");
 				$('#ldap_attr_member').val("<?=$tmpldata['attr_member'];?>");
+				$("#ldap_allow_unauthenticated").attr("checked", <?=$tmpldata['allow_unauthenticated'];?>);
 				break;
 <?php
 			$index++;
@@ -947,6 +1029,7 @@ events.push(function() {
 
 	hideClass('ldapanon', $('#ldap_anon').prop('checked'));
 	hideClass('extended', !$('#ldap_extended_enabled').prop('checked'));
+	hideClass('ldap_rfc2307_userdn', !$('#ldap_rfc2307').prop('checked'));
 	set_required_port_fields();
 
 	if ($('#ldap_port').val() == "")
@@ -987,6 +1070,10 @@ events.push(function() {
 
 	$('#ldap_extended_enabled').click(function () {
 		hideClass('extended', !this.checked);
+	});
+
+	$('#ldap_rfc2307').click(function () {
+		hideClass('ldap_rfc2307_userdn', !this.checked);
 	});
 
 	$('#radius_srvcs').on('change', function() {

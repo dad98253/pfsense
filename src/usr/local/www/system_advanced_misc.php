@@ -3,7 +3,9 @@
  * system_advanced_misc.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2008 Shrew Soft Inc
  * All rights reserved.
  *
@@ -36,7 +38,22 @@ require_once("functions.inc");
 require_once("filter.inc");
 require_once("shaper.inc");
 require_once("vpn.inc");
-require_once("vslb.inc");
+
+$powerd_modes = array(
+	'hadp' => gettext('Hiadaptive'),
+	'adp' => gettext('Adaptive'),
+	'min' => gettext('Minimum'),
+	'max' => gettext('Maximum'),
+);
+$mds_modes = array(
+	'' => gettext('Default'),
+	0 => gettext('Mitigation disabled'),
+	1 => gettext('VERW instruction (microcode) mitigation enabled'),
+	2 => gettext('Software sequence mitigation enabled (not recommended)'),
+	3 => gettext('Automatic VERW or Software selection'),
+);
+
+$available_kernel_memory = get_single_sysctl("vm.kmem_map_free");
 
 $pconfig['proxyurl'] = $config['system']['proxyurl'];
 $pconfig['proxyport'] = $config['system']['proxyport'];
@@ -49,6 +66,7 @@ $pconfig['powerd_enable'] = isset($config['system']['powerd_enable']);
 $pconfig['crypto_hardware'] = $config['system']['crypto_hardware'];
 $pconfig['thermal_hardware'] = $config['system']['thermal_hardware'];
 $pconfig['pti_disabled'] = isset($config['system']['pti_disabled']);
+$pconfig['mds_disable'] = $config['system']['mds_disable'];
 $pconfig['schedule_states'] = isset($config['system']['schedule_states']);
 $pconfig['gw_down_kill_states'] = isset($config['system']['gw_down_kill_states']);
 $pconfig['skip_rules_gw_down'] = isset($config['system']['skip_rules_gw_down']);
@@ -59,6 +77,14 @@ $pconfig['do_not_send_uniqueid'] = isset($config['system']['do_not_send_uniqueid
 
 $use_mfs_tmpvar_before = isset($config['system']['use_mfs_tmpvar']) ? true : false;
 $use_mfs_tmpvar_after = $use_mfs_tmpvar_before;
+
+/* Adjust available kernel memory to account for existing RAM disks
+ * https://redmine.pfsense.org/issues/10420 */
+if ($use_mfs_tmpvar_before) {
+	/* Get current RAM disk sizes */
+	$current_ram_disk_size = (int) trim(exec("/bin/df -k /tmp /var | /usr/bin/awk '/\/dev\/md/ {sum += \$2 * 1024} END {print sum}'"));
+	$available_kernel_memory += $current_ram_disk_size;
+}
 
 $pconfig['powerd_ac_mode'] = "hadp";
 if (!empty($config['system']['powerd_ac_mode'])) {
@@ -108,6 +134,11 @@ if ($_POST) {
 		$input_errors[] = gettext("/var Size must be numeric and should not be less than 60MiB.");
 	}
 
+	if (is_numericint($_POST['use_mfs_tmp_size']) && is_numericint($_POST['use_mfs_var_size']) &&
+	    ((($_POST['use_mfs_tmp_size'] + $_POST['use_mfs_var_size']) * 1024 * 1024) > $available_kernel_memory)) {
+		$input_errors[] = gettext("Combined size of /tmp and /var RAM disks would exceed available kernel memory.");
+	}
+
 	if (!empty($_POST['proxyport']) && !is_port($_POST['proxyport'])) {
 		$input_errors[] = gettext("Proxy port must be a valid port number, 1-65535.");
 	}
@@ -122,6 +153,19 @@ if ($_POST) {
 
 	if ($_POST['proxypass'] != $_POST['proxypass_confirm']) {
 		$input_errors[] = gettext("Proxy password and confirmation must match.");
+	}
+
+	if (!in_array($_POST['powerd_ac_mode'], array_keys($powerd_modes))) {
+		$input_errors[] = gettext("Invalid AC Power mode.");
+	}
+	if (!in_array($_POST['powerd_battery_mode'], array_keys($powerd_modes))) {
+		$input_errors[] = gettext("Invalid Battery Power mode.");
+	}
+	if (!in_array($_POST['powerd_normal_mode'], array_keys($powerd_modes))) {
+		$input_errors[] = gettext("Invalid Unknown Power mode.");
+	}
+	if (!in_array($_POST['mds_disable'], array_keys($mds_modes))) {
+		$input_errors[] = gettext("Invalid MDS Mode.");
 	}
 
 	if (!$input_errors) {
@@ -159,20 +203,16 @@ if ($_POST) {
 			unset($config['system']['proxypass']);
 		}
 
-		$need_relayd_restart = false;
 		if ($_POST['lb_use_sticky'] == "yes") {
 			if (!isset($config['system']['lb_use_sticky'])) {
 				$config['system']['lb_use_sticky'] = true;
-				$need_relayd_restart = true;
 			}
 			if ($config['system']['srctrack'] != $_POST['srctrack']) {
 				$config['system']['srctrack'] = $_POST['srctrack'];
-				$need_relayd_restart = true;
 			}
 		} else {
 			if (isset($config['system']['lb_use_sticky'])) {
 				unset($config['system']['lb_use_sticky']);
-				$need_relayd_restart = true;
 			}
 		}
 
@@ -215,6 +255,11 @@ if ($_POST) {
 			$config['system']['pti_disabled'] = true;
 		} else {
 			unset($config['system']['pti_disabled']);
+		}
+		if (isset($_POST['mds_disable']) && (strlen($_POST['mds_disable']) > 0)) {
+			$config['system']['mds_disable'] = $_POST['mds_disable'];
+		} else {
+			unset($config['system']['mds_disable']);
 		}
 
 		if ($_POST['schedule_states'] == "yes") {
@@ -293,12 +338,13 @@ if ($_POST) {
 		if ($old_pti_state != isset($config['system']['pti_disabled'])) {
 			setup_loader_settings();
 		}
+		if (isset($config['system']['mds_disable']) &&
+		    (strlen($config['system']['mds_disable']) > 0)) {
+			set_single_sysctl("hw.mds_disable" , (int)$config['system']['mds_disable']);
+		}
 		activate_powerd();
 		load_crypto();
 		load_thermal_hardware();
-		if ($need_relayd_restart) {
-			relayd_configure();
-		}
 	}
 }
 
@@ -345,7 +391,8 @@ $section->addInput(new Form_Input(
 	'proxyuser',
 	'Proxy Username',
 	'text',
-	$pconfig['proxyuser']
+	$pconfig['proxyuser'],
+	['autocomplete' => 'new-password']
 ))->setHelp('Username for authentication to proxy server. Optional, '.
 	'leave blank to not use authentication.');
 
@@ -366,13 +413,12 @@ $group->add(new Form_Checkbox(
 	'Use sticky connections',
 	'Use sticky connections',
 	$pconfig['lb_use_sticky']
-))->setHelp('Successive connections will be redirected to the servers in a '.
-	'round-robin manner with connections from the same source being sent to the '.
-	'same web server. This "sticky connection" will exist as long as there are '.
+))->setHelp('Successive connections will be redirected via gateways in a '.
+	'round-robin manner with connections from the same source being sent via the '.
+	'same gateway. This "sticky connection" will exist as long as there are '.
 	'states that refer to this connection. Once the states expire, so will the '.
 	'sticky connection. Further connections from that host will be redirected '.
-	'to the next web server in the round robin. Changing this option will '.
-	'restart the Load Balancing service.');
+	'via the next gateway in the round robin.');
 
 $group->add(new Form_Input(
 	'srctrack',
@@ -409,32 +455,25 @@ $section->addInput(new Form_Checkbox(
 	'power consumption.	 It raises frequency faster, drops slower and keeps twice '.
 	'lower CPU load.');
 
-$modes = array(
-	'hadp' => gettext('Hiadaptive'),
-	'adp' => gettext('Adaptive'),
-	'min' => gettext('Minimum'),
-	'max' => gettext('Maximum'),
-);
-
 $section->addInput(new Form_Select(
 	'powerd_ac_mode',
 	'AC Power',
 	$pconfig['powerd_ac_mode'],
-	$modes
+	$powerd_modes
 ));
 
 $section->addInput(new Form_Select(
 	'powerd_battery_mode',
 	'Battery Power',
 	$pconfig['powerd_battery_mode'],
-	$modes
+	$powerd_modes
 ));
 
 $section->addInput(new Form_Select(
 	'powerd_normal_mode',
 	'Unknown Power',
 	$pconfig['powerd_normal_mode'],
-	$modes
+	$powerd_modes
 ));
 
 $form->add($section);
@@ -466,17 +505,36 @@ $section->addInput(new Form_Select(
 	'"none" and then reboot.');
 
 $form->add($section);
+
 $pti = get_single_sysctl('vm.pmap.pti');
 if (strlen($pti) > 0) {
 	$section = new Form_Section('Kernel Page Table Isolation');
 	$section->addInput(new Form_Checkbox(
 		'pti_disabled',
 		'Kernel PTI',
-		'Disable the kernel PTI',
+		'Forcefully disable the kernel PTI',
 		$pconfig['pti_disabled']
-	))->setHelp('Meltdown workaround.  If disabled the kernel memory can be accessed by unprivileged users on affected CPUs.');
+	))->setHelp('Meltdown workaround. If disabled the kernel memory can be accessed by unprivileged users on affected CPUs. ' .
+		    'This option forces the workaround off, and requires a reboot to activate. %1$s%1$s' .
+		    'PTI is active by default only on affected CPUs, if PTI is disabled by default then this option will have no effect. %1$s' .
+		    'Current PTI status: %2$s', "<br/>", ($pti == "1") ? "Enabled" : "Disabled");
 	$form->add($section);
 }
+
+$mds = get_single_sysctl('hw.mds_disable_state');
+if (strlen($mds) > 0) {
+	$section = new Form_Section('Microarchitectural Data Sampling Mitigation');
+	$section->addInput(new Form_Select(
+		'mds_disable',
+		'MDS Mode',
+		$pconfig['mds_disable'],
+		$mds_modes
+	))->setHelp('Microarchitectural Data Sampling mitigation. If disabled the kernel memory can be accessed by unprivileged users on affected CPUs. ' .
+		    'This option controls which method of MDS mitigation is used, if any. %1$s%1$s' .
+		    'Current MDS status: %2$s', "<br/>", ucwords(htmlspecialchars($mds)));
+	$form->add($section);
+}
+
 $section = new Form_Section('Schedules');
 
 $section->addInput(new Form_Checkbox(
@@ -539,7 +597,10 @@ $group->add(new Form_Input(
 	['placeholder' => 60]
 ))->setHelp('/var RAM Disk<br />Do not set lower than 60.');
 
-$group->setHelp('Sets the size, in MiB, for the RAM disks.');
+$group->setHelp('Sets the size, in MiB, for the RAM disks. ' .
+	'Ensure each RAM disk is large enough to contain the current contents of the directories in question. %s' .
+	'Maximum total size of all RAM disks cannot exceed available kernel memory: %s',
+	'<br/>', format_bytes( $available_kernel_memory ));
 
 $section->add($group);
 
@@ -606,7 +667,8 @@ $form->add($section);
 print $form;
 
 $ramdisk_msg = gettext('The \"Use Ramdisk\" setting has been changed. This requires the firewall\nto reboot.\n\nReboot now ?');
-$use_mfs_tmpvar_changed = (($use_mfs_tmpvar_before !== $use_mfs_tmpvar_after) && !$input_errors);
+$use_mfs_tmpvar_changed = ((($use_mfs_tmpvar_before !== $use_mfs_tmpvar_after) ||
+			    (!empty($_POST) && $use_mfs_tmpvar_after && file_exists('/conf/ram_disks_failed'))) && !$input_errors);
 ?>
 
 <script type="text/javascript">

@@ -3,7 +3,9 @@
  * vpn_ipsec_phase2.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2008 Shrew Soft Inc
  * All rights reserved.
  *
@@ -36,20 +38,10 @@ require_once("guiconfig.inc");
 require_once("ipsec.inc");
 require_once("vpn.inc");
 
-if (!is_array($config['ipsec']['client'])) {
-	$config['ipsec']['client'] = array();
-}
-
+init_config_arr(array('ipsec', 'client'));
 $a_client = &$config['ipsec']['client'];
-
-if (!is_array($config['ipsec']['phase1'])) {
-	$config['ipsec']['phase1'] = array();
-}
-
-if (!is_array($config['ipsec']['phase2'])) {
-	$config['ipsec']['phase2'] = array();
-}
-
+init_config_arr(array('ipsec', 'phase1'));
+init_config_arr(array('ipsec', 'phase2'));
 $a_phase1 = &$config['ipsec']['phase1'];
 $a_phase2 = &$config['ipsec']['phase2'];
 
@@ -172,6 +164,11 @@ if ($_POST['save']) {
 					$input_errors[] = gettext("An IPv6 local address was specified but the mode is not set to tunnel6");
 				}
 				break;
+			default:
+				if (($pconfig['mode'] == "vti") && !is_ipaddr($pconfig['localid_address'])) {
+					$input_errors[] = gettext("VTI requires a valid local network or IP address for its endpoint address, it cannot use a network macro for a different interface (e.g. LAN).");
+				}
+
 		}
 		/* Check if the localid_type is an interface, to confirm if it has a valid subnet. */
 		if (is_array($config['interfaces'][$pconfig['localid_type']])) {
@@ -238,9 +235,13 @@ if ($_POST['save']) {
 	/* Validate enabled phase2's are not duplicates */
 	if (isset($pconfig['mobile'])) {
 		/* User is adding phase 2 for mobile phase1 */
+		if ($pconfig['mode'] == "vti") {
+			$input_errors[] = gettext("VTI is not compatible with mobile IPsec.");
+		}
+
 		foreach ($a_phase2 as $key => $name) {
 			if (isset($name['mobile']) && $name['uniqid'] != $pconfig['uniqid']) {
-				/* check duplicate localids only for mobile clents */
+				/* check duplicate localids only for mobile clients */
 				$localid_data = ipsec_idinfo_to_cidr($name['localid'], false, $name['mode']);
 				$entered = array();
 				$entered['type'] = $pconfig['localid_type'];
@@ -643,7 +644,7 @@ foreach ($p2_ealgos as $algo => $algodata) {
 		$algodata['name'],
 		(is_array($pconfig['ealgos']) && in_array($algo, $pconfig['ealgos'])),
 		$algo
-	))->addClass('multi')->setAttribute('id');
+	))->addClass('multi ealgoschk')->setAttribute('id', $algodata['name']);
 
 	if (is_array($algodata['keysel'])) {
 		$list = array();
@@ -683,14 +684,14 @@ foreach ($p2_halgos as $algo => $algoname) {
 		$algo
 	))->addClass('multi')->setAttribute('id');
 
-	$group->setHelp('Note: MD5 and SHA1 provide weak security and should be avoided.');
+	$group->setHelp('Note: Hash is ignored with GCM algorithms. MD5 and SHA1 provide weak security and should be avoided.');
 }
 
 $section->add($group);
 
 $sm = (!isset($pconfig['mobile']) || !isset($a_client['pfs_group']));
 $helpstr = $sm ? '':'Set globally in mobile client options. ';
-$helpstr .= 'Note: Groups 1, 2, 22, 23, and 24 provide weak security and should be avoided.';
+$helpstr .= 'Note: Groups 1, 2, 5, 22, 23, and 24 provide weak security and should be avoided.';
 
 $section->addInput(new Form_Select(
 	'pfsgroup',
@@ -718,7 +719,7 @@ $section->addInput(new Form_IpAddress(
 
 // Hidden inputs
 if ($pconfig['mobile']) {
-	$section->addInput(new Form_Input(
+	$form->addGlobal(new Form_Input(
 		'mobile',
 		null,
 		'hidden',
@@ -726,7 +727,7 @@ if ($pconfig['mobile']) {
 	));
 }
 
-$section->addInput(new Form_Input(
+$form->addGlobal(new Form_Input(
 	'ikeid',
 	null,
 	'hidden',
@@ -734,7 +735,7 @@ $section->addInput(new Form_Input(
 ));
 
 if (!empty($pconfig['reqid'])) {
-	$section->addInput(new Form_Input(
+	$form->addGlobal(new Form_Input(
 		'reqid',
 		null,
 		'hidden',
@@ -742,7 +743,7 @@ if (!empty($pconfig['reqid'])) {
 	));
 }
 
-$section->addInput(new Form_Input(
+$form->addGlobal(new Form_Input(
 	'uniqid',
 	null,
 	'hidden',
@@ -784,11 +785,13 @@ events.push(function() {
 		} else if (value == 'vti') {
 			hideClass('opt_localid', false);
 			hideClass('opt_natid', true);
-			$('#localid_type').val('network');
+			hideClass('opt_remoteid', false);
+			$('#localid_type').val('address');
+			disableInput('localid_type', false);
 			typesel_change_local(30);
 			$('#remoteid_type').val('address');
-			disableInput('remoteid_type', true);
-			typesel_change_remote(32);
+			disableInput('remoteid_type', false);
+			typesel_change_remote(30);
 			$('#opt_localid_help').html("<?=$localid_help_vti?>");
 			$('#opt_remoteid_help').html("<?=$remoteid_help_vti?>");
 		} else {
@@ -958,7 +961,19 @@ events.push(function() {
 	<?php endif; ?>
 
 	function change_protocol() {
-			hideClass('encalg', ($('#proto').val() != 'esp'));
+		hideClass('encalg', ($('#proto').val() != 'esp'));
+	}
+
+	function change_aead() {
+		var notaead = ['AES', 'Blowfish', '3DES', 'CAST128'];
+		var arrayLength = notaead.length;
+		for (var i = 0; i < arrayLength; i++) {
+			if ($('#' + notaead[i]).prop('checked')) {
+				$("input[name='halgos[]']").prop("disabled", false);
+				return;
+			} 
+		}
+		$("input[name='halgos[]']").prop("disabled", true);
 	}
 
 	// ---------- Monitor elements for change and call the appropriate display functions ----------
@@ -966,6 +981,11 @@ events.push(function() {
 	 // Protocol
 	$('#proto').change(function () {
 		change_protocol();
+	});
+
+	// AEAD
+	$(".ealgoschk").click(function () {
+		change_aead();
 	});
 
 	 // Localid
@@ -989,11 +1009,10 @@ events.push(function() {
 	});
 
 	// ---------- On initial page load ------------------------------------------------------------
-	hideInput('ikeid', true);
-	hideInput('uniqid', true);
 
 	change_mode();
 	change_protocol();
+	change_aead();
 	typesel_change_local(<?=htmlspecialchars($pconfig['localid_netbits'])?>);
 	typesel_change_natlocal(<?=htmlspecialchars($pconfig['natlocalid_netbits'])?>);
 <?php

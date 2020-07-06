@@ -3,7 +3,9 @@
  * globals.inc
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -67,9 +69,8 @@ $g = array(
 	"disablehelpmenu" => false,
 	"disablehelpicon" => false,
 	"disablecrashreporter" => false,
-	"crashreporterurl" => "https://crashreporter.pfsense.org/crash_reporter.php",
 	"debug" => false,
-	"latest_config" => "18.6",
+	"latest_config" => "20.6",
 	"minimum_ram_warning" => "101",
 	"minimum_ram_warning_text" => "128 MB",
 	"wan_interface_name" => "wan",
@@ -78,14 +79,17 @@ $g = array(
 	"captiveportal_element_sizelimit" => 1048576,
 	"captiveportal_rules_interval" => 50,
 	"services_dhcp_server_enable" => true,
-	"wireless_regex" => "/^(ath|bwi|bwn|ipw|iwi|iwm|iwn|malo|mwl|ral|rsu|rum|run|uath|upgt|ural|urtw|urtwn|wi|wpi|wtap|zyd)[0-9]+/",
+	"wireless_regex" => "/^(ath|athp|bwi|bwn|ipw|iwi|iwm|iwn|malo|mwl|ral|rsu|rtwn|rum|run|uath|upgt|ural|urtw|urtwn|wi|wpi|wtap|zyd)[0-9]+/",
 	"help_base_url" => "/help.php",
 	"pkg_prefix" => "pfSense-pkg-",
 	"default_timezone" => "Etc/UTC",
 	"language" => "en_US",
 	"default_config_backup_count" => 30,
+	"default_cert_expiredays" => 27,
+	"default_log_entries" => 500,
+	"default_log_size" => 512000,
 	"minimumtableentries_bogonsv6" => 400000,
-	"alternativemetaports" => array("vmware", "php72")
+	"alternativemetaports" => array("vmware", "php72", "php73")
 );
 
 /* IP TOS flags */
@@ -114,6 +118,8 @@ if (file_exists("{$g['etc_path']}/default-config-flavor")) {
 } else {
 	$g['default-config-flavor'] = '';
 }
+
+$g['openvpn_base'] = "{$g['varetc_path']}/openvpn";
 
 /* Default sysctls */
 $sysctls = array("net.inet.ip.portrange.first" => "1024",
@@ -163,6 +169,11 @@ $sysctls = array("net.inet.ip.portrange.first" => "1024",
 	"kern.corefile" => "/root/%N.core" /* Write all core files to /root/ so they do not consume space on other slices */
 );
 
+$machine_type = php_uname('m');
+if (($machine_type == 'arm') || ($machine_type == 'arm64')) {
+	$sysctls['kern.shutdown.secure_halt'] = 1;
+}
+
 /* Include override values for the above if needed. If the file doesn't exist, don't try to load it. */
 if (file_exists("/etc/inc/globals_override.inc")) {
 	@include_once("globals_override.inc");
@@ -204,7 +215,7 @@ $factory_default_checkipservice = array(
 	"descr" => 'Default Check IP Service'
 );
 
-$dyndns_split_domain_types = array("namecheap", "cloudflare", "cloudflare-v6", "gratisdns", "cloudns", "godaddy", "godaddy-v6");
+$dyndns_split_domain_types = array("namecheap", "cloudflare", "cloudflare-v6", "gratisdns", "cloudns", "godaddy", "godaddy-v6", "linode", "linode-v6");
 
 /* pf tokens from FreeBSD source sbin/pfctl/parse.y (plus our custom entries at the end)*/
 global $pf_reserved_keywords;
@@ -222,4 +233,79 @@ $pf_reserved_keywords = array(
 	"maxsrcstates", "maxsrcnodes", "sourcetrack", "global", "rule", "maxsrcconn", "maxsrcconnrate", "overload",
 	"flush", "sloppy", "tagged", "tag", "ifbound", "floating", "statepolicy", "statedefaults", "route", "settos",
 	"divertto", "divertreply", "max", "min", "pptp", "pppoe", "L2TP", "OpenVPN", "IPsec");
+
+/* Reserved table names to avoid collision */
+global $reserved_table_names;
+$reserved_table_names = array(
+	"bogons",
+	"bogonsv6",
+	"negate_networks",
+	"snort2c",
+	"sshguard",
+	"tonatsubnets",
+	"virusprot",
+	"vpn_networks",
+);
+
+/* VLAN Prio values. */
+$vlanprio_values = array(
+	"bk" => 0,
+	"be" => 1,
+	"ee" => 2,
+	"ca" => 3,
+	"vi" => 4,
+	"vo" => 5,
+	"ic" => 6,
+	"nc" => 7
+);
+
+$vlanprio = array(
+	"bk" => "Background (BK, 0)",
+	"be" => "Best Effort (BE, 1)",
+	"ee" => "Excellent Effort (EE, 2)",
+	"ca" => "Critical Applications (CA, 3)",
+	"vi" => "Video (VI, 4)",
+	"vo" => "Voice (VO, 5)",
+	"ic" => "Internetwork Control (IC, 6)",
+	"nc" => "Network Control (NC, 7)"
+);
+
+global $system_log_files;
+$system_log_files = array(
+	"system", "filter", "dhcpd", "vpn", "poes", "l2tps", "openvpn",
+	"portalauth", "ipsec", "ppp", "wireless", "nginx", "ntpd", "gateways",
+	"resolver", "routing", "auth");
+
+global $system_log_non_syslog_files;
+$system_log_non_syslog_files = array('dmesg.boot', 'utx.log', 'userlog');
+
+global $system_log_compression_types;
+$system_log_compression_types = array(
+	'bzip2' => array(
+			'flag' => 'J',
+			'cat' => '/usr/bin/bzcat -qf',
+			'ext' => 'bz2',
+		),
+	'gzip' => array(
+			'flag' => 'Z',
+			'cat' => '/usr/bin/zcat -qf',
+			'ext' => 'gz',
+		),
+	'xz' => array(
+			'flag' => 'X',
+			'cat' => '/usr/bin/xzcat -qf',
+			'ext' => 'xz',
+		),
+	'zstd' => array(
+			'flag' => 'Y',
+			'cat' => '/usr/bin/zstdcat -qqf',
+			'ext' => 'zst',
+		),
+	'none' => array(
+			'flag' => '',
+			'cat' => '/usr/bin/cat',
+			'ext' => '',
+		),
+);
+
 ?>

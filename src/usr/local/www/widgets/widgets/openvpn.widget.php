@@ -3,7 +3,9 @@
  * openvpn.widget.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -44,7 +46,12 @@ if (!function_exists('printPanel')) {
 			$got_ovpn_server = true;
 
 		$opstring .= "<div class=\"widget panel panel-default\">";
-		$opstring .=	"<div class=\"panel-heading\"><h2 class=\"panel-title\">" . htmlspecialchars($server['name']) . "</h2></div>";
+		$opstring .= "<div class=\"panel-heading\"><h2 class=\"panel-title\">" .
+		    htmlspecialchars($server['name']);
+		if ($server['conns'][0]['common_name'] != '[error]') {
+			$opstring .= ' (' . sizeof($server['conns']) . ')';
+		}
+		$opstring .=    "</h2></div>";
 		$opstring .=	"<div class=\"table-responsive\">";
 		$opstring .=		"<table class=\"table table-striped table-hover table-condensed sortable-theme-bootstrap\" data-sortable>";
 		$opstring .=			"<thead>";

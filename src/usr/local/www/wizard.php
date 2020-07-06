@@ -3,7 +3,9 @@
  * wizard.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -139,8 +141,16 @@ if ($stepid > $totalsteps) {
 	$stepid = $totalsteps;
 }
 
-$title = preg_replace("/pfSense/i", $g['product_name'], $pkg['step'][$stepid]['title']);
-$description = preg_replace("/pfSense/i", $g['product_name'], $pkg['step'][$stepid]['description']);
+// Convert a string containing a text version of a PHP array into a real $config array
+// that can then be created. e.g.: config_array_from_str("['apple']['orange']['pear']['banana']");
+function config_array_from_str( $text) {
+	$t = str_replace("[", "", $text);	// Remove '['
+	$t = str_replace("'", "", $t);		// Remove '
+	$t = str_replace("\"", "", $t);		// Remove "
+	$t = str_replace("]", " ", $t);		// Convert ] to space
+	$a = explode(" ", trim($t));
+	init_config_arr($a);
+}
 
 function update_config_field($field, $updatetext, $unset, $arraynum, $field_type) {
 	global $config;
@@ -179,13 +189,22 @@ function update_config_field($field, $updatetext, $unset, $arraynum, $field_type
 		$text = "unset(\$config" . $field_conv . ");";
 		eval($text);
 	}
+
+	// Verify that the needed $config element exists. If not, create it
+	$tsttext = 'return (isset($config' . $field_conv . '));';
+
+	if (!eval($tsttext)) {
+		config_array_from_str($field_conv);
+	}
+
 	$text .= "\$thisvar = &\$config" . $field_conv . ";";
 	eval($text);
+
 	$thisvar = $updatetext;
 }
 
-$title	   = preg_replace("/pfSense/i", $g['product_name'], $pkg['step'][$stepid]['title']);
-$description = preg_replace("/pfSense/i", $g['product_name'], $pkg['step'][$stepid]['description']);
+$title	   = $pkg['step'][$stepid]['title'];
+$description = $pkg['step'][$stepid]['description'];
 
 // handle before form display event.
 do {
@@ -771,13 +790,83 @@ if ($pkg['step'][$stepid]['fields']['field'] != "") {
 
 				}
 
-				$section->addInput(new Form_Select(
+				$tmpselect = new Form_Select(
 					$name,
 					$etitle,
 					($multiple) ? $selected:$selected[0],
 					$options,
 					$multiple
-				))->setHelp($field['description'])->setOnchange($onchange);
+				);
+
+				$tmpselect->setHelp($field['description'])->setOnchange($onchange);
+
+				if (isset($field['size'])) {
+					$tmpselect->setAttribute('size', $field['size']);
+				}
+
+				$section->addInput($tmpselect);
+
+				break;
+			case "select_source":
+				if ($field['displayname']) {
+					$etitle = $field['displayname'];
+				} else if (!$field['dontdisplayname']) {
+					$etitle =  fixup_string($name);
+				}
+
+				if ($field['size']) {
+					$size = " size='" . $field['size'] . "' ";
+				}
+
+				if (isset($field['multiple'])) {
+					$items = explode(',', $value);
+					$name .= "[]";
+				} else {
+					$items = array($value);
+				}
+
+				$onchange = (isset($field['onchange']) ? "{$field['onchange']}" : '');
+
+				$source = $field['source'];
+				try{
+					@eval("\$wizard_source_txt = &$source;");
+				} catch (\Throwable | \Error | \Exception $e) {
+					//do nothing
+				}
+				#check if show disable option is present on xml
+				if (!is_array($wizard_source_txt)) {
+					$wizard_source_txt = array();
+				}
+				if (isset($field['show_disable_value'])) {
+					array_push($wizard_source_txt,
+						array(
+							($field['source_name'] ? $field['source_name'] : $name) => $field['show_disable_value'],
+							($field['source_value'] ? $field['source_value'] : $value) => $field['show_disable_value']
+						));
+				}
+
+				$srcoptions = array();
+				$srcselected = array();
+
+				foreach ($wizard_source_txt as $opt) {
+					$source_name = ($field['source_name'] ? $opt[$field['source_name']] : $opt[$name]);
+					$source_value = ($field['source_value'] ? $opt[$field['source_value']] : $opt[$value]);
+					$srcoptions[$source_value] = $source_name;
+
+					if (in_array($source_value, $items)) {
+						array_push($srcselected, $source_value);
+					}
+				}
+
+				$descr = (isset($field['description'])) ? $field['description'] : "";
+
+				$section->addInput(new Form_Select(
+					$name,
+					$etitle,
+					isset($field['multiple']) ? $srcselected : $srcselected[0],
+					$srcoptions,
+					isset($field['multiple'])
+				))->setHelp($descr)->setOnchange($onchange);
 
 				break;
 			case "textarea":

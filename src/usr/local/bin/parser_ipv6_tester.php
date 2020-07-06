@@ -3,7 +3,7 @@
 /*
  * parser_ipv6_tester.php
  *
- * Copyright (c) 2017-2018 Anders Lind (anders.lind@gmail.com)
+ * Copyright (c) 2017-2019 Anders Lind (anders.lind@gmail.com)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -44,11 +44,11 @@ if ($is_pfSense) {
  * Tests the content for valid IPv6 addresses and compares the matches against
  * a checklist. Each checklist entry is also separately matched and compared
  * against itself. The order of the resulting matches must be identical to the
- * order of the list entries to provide succesful passes.
+ * order of the list entries to provide successful passes.
  *
  * Amount of matches should always equal amount of list entries in the
  * checklist.
- * Passes are for succesful matches.
+ * Passes are for successful matches.
  * Fails should always stay 0.
  * Fails are for iterations where:
  * * comparison between a current match of text and a current list entry are

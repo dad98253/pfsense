@@ -3,7 +3,9 @@
  * foot.inc
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -37,8 +39,8 @@
 
 	<!-- This use of filemtime() is intended to fool the browser into reloading the file (not using the cached version) if the file is changed -->
 
-	<script src="/vendor/jquery/jquery-1.12.0.min.js?v=<?=filemtime('/usr/local/www/vendor/jquery/jquery-1.12.0.min.js')?>"></script>
-	<script src="/vendor/jquery/jquery-ui-1.11.4.min.js?v=<?=filemtime('/usr/local/www/vendor/jquery/jquery-ui-1.11.4.min.js')?>"></script>
+	<script src="/vendor/jquery/jquery-3.5.1.min.js?v=<?=filemtime('/usr/local/www/vendor/jquery/jquery-3.5.1.min.js')?>"></script>
+ 	<script src="/vendor/jquery-ui/jquery-ui-1.12.1.min.js?v=<?=filemtime('/usr/local/www/vendor/jquery-ui/jquery-ui-1.12.1.min.js')?>"></script>
 	<script src="/vendor/bootstrap/js/bootstrap.min.js?v=<?=filemtime('/usr/local/www/vendor/bootstrap/js/bootstrap.min.js')?>"></script>
 	<script src="/js/pfSense.js?v=<?=filemtime('/usr/local/www/js/pfSense.js')?>"></script>
 	<script src="/js/pfSenseHelpers.js?v=<?=filemtime('/usr/local/www/js/pfSenseHelpers.js')?>"></script>

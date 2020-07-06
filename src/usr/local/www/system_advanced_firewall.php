@@ -3,7 +3,9 @@
  * system_advanced_firewall.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2008 Shrew Soft Inc
  * All rights reserved.
  *
@@ -35,6 +37,7 @@ require_once("guiconfig.inc");
 require_once("functions.inc");
 require_once("filter.inc");
 require_once("shaper.inc");
+require_once("pfsense-utils.inc");
 
 $pconfig['disablefilter'] = $config['system']['disablefilter'];
 $pconfig['scrubnodf'] = $config['system']['scrubnodf'];
@@ -47,9 +50,11 @@ $pconfig['aliasesresolveinterval'] = $config['system']['aliasesresolveinterval']
 $old_aliasesresolveinterval = $config['system']['aliasesresolveinterval'];
 $pconfig['checkaliasesurlcert'] = isset($config['system']['checkaliasesurlcert']);
 $pconfig['maximumtableentries'] = $config['system']['maximumtableentries'];
+$old_maximumtableentries = $config['system']['maximumtableentries'];
 $pconfig['maximumfrags'] = $config['system']['maximumfrags'];
 $pconfig['disablereplyto'] = isset($config['system']['disablereplyto']);
 $pconfig['disablenegate'] = isset($config['system']['disablenegate']);
+$pconfig['no_apipa_block'] = isset($config['system']['no_apipa_block']);
 $pconfig['bogonsinterval'] = $config['system']['bogons']['interval'];
 $pconfig['disablenatreflection'] = $config['system']['disablenatreflection'];
 $pconfig['enablebinatreflection'] = $config['system']['enablebinatreflection'];
@@ -64,6 +69,7 @@ $pconfig['tcpestablishedtimeout'] = $config['system']['tcpestablishedtimeout'];
 $pconfig['tcpclosingtimeout'] = $config['system']['tcpclosingtimeout'];
 $pconfig['tcpfinwaittimeout'] = $config['system']['tcpfinwaittimeout'];
 $pconfig['tcpclosedtimeout'] = $config['system']['tcpclosedtimeout'];
+$pconfig['tcptsdifftimeout'] = $config['system']['tcptsdifftimeout'];
 $pconfig['udpfirsttimeout'] = $config['system']['udpfirsttimeout'];
 $pconfig['udpsingletimeout'] = $config['system']['udpsingletimeout'];
 $pconfig['udpmultipletimeout'] = $config['system']['udpmultipletimeout'];
@@ -72,6 +78,12 @@ $pconfig['icmperrortimeout'] = $config['system']['icmperrortimeout'];
 $pconfig['otherfirsttimeout'] = $config['system']['otherfirsttimeout'];
 $pconfig['othersingletimeout'] = $config['system']['othersingletimeout'];
 $pconfig['othermultipletimeout'] = $config['system']['othermultipletimeout'];
+
+$show_reboot_msg = false;
+$reboot_msg = gettext('The \"Firewall Maximum Table Entries\" setting has ' .
+    'been changed to a value bigger than system can support without a ' .
+    'reboot.\n\nReboot now ?');
+$pftimeouts = get_pf_timeouts();
 
 if ($_POST) {
 
@@ -123,6 +135,9 @@ if ($_POST) {
 	}
 	if ($_POST['tcpclosedtimeout'] && !is_numericint($_POST['tcpclosedtimeout'])) {
 		$input_errors[] = gettext("The TCP closed timeout value must be an integer.");
+	}
+	if ($_POST['tcptsdifftimeout'] && !is_numericint($_POST['tcptsdifftimeout'])) {
+		$input_errors[] = gettext("The TCP tsdiff timeout value must be an integer.");
 	}
 	if ($_POST['udpfirsttimeout'] && !is_numericint($_POST['udpfirsttimeout'])) {
 		$input_errors[] = gettext("The UDP first timeout value must be an integer.");
@@ -250,6 +265,11 @@ if ($_POST) {
 		} else {
 			unset($config['system']['tcpclosedtimeout']);
 		}
+		if (!empty($_POST['tcptsdifftimeout'])) {
+			$config['system']['tcptsdifftimeout'] = $_POST['tcptsdifftimeout'];
+		} else {
+			unset($config['system']['tcptsdifftimeout']);
+		}
 		if (!empty($_POST['udpfirsttimeout'])) {
 			$config['system']['udpfirsttimeout'] = $_POST['udpfirsttimeout'];
 		} else {
@@ -320,13 +340,19 @@ if ($_POST) {
 			unset($config['system']['disablenegate']);
 		}
 
+		if ($_POST['no_apipa_block'] == "yes") {
+			$config['system']['no_apipa_block'] = "enabled";
+		} else {
+			unset($config['system']['no_apipa_block']);
+		}
+
 		if ($_POST['enablenatreflectionhelper'] == "yes") {
 			$config['system']['enablenatreflectionhelper'] = "yes";
 		} else {
 			unset($config['system']['enablenatreflectionhelper']);
 		}
 
-		$config['system']['reflectiontimeout'] = $_POST['reflection-timeout'];
+		$config['system']['reflectiontimeout'] = $_POST['reflectiontimeout'];
 
 		if ($_POST['bypassstaticroutes'] == "yes") {
 			$config['filter']['bypassstaticroutes'] = $_POST['bypassstaticroutes'];
@@ -368,6 +394,20 @@ if ($_POST) {
 		if (($old_aliasesresolveinterval != $config['system']['aliasesresolveinterval']) &&
 		    isvalidpid("{$g['varrun_path']}/filterdns.pid")) {
 			killbypid("{$g['varrun_path']}/filterdns.pid");
+		}
+
+		/* Update loader.conf when necessary */
+		if ($old_maximumtableentries !=
+		    $config['system']['maximumtableentries']) {
+			setup_loader_settings();
+			$cur_maximumtableentries = get_single_sysctl(
+			    'net.pf.request_maxcount');
+
+
+			if ($config['system']['maximumtableentries'] >
+			    $cur_maximumtableentries) {
+				$show_reboot_msg = true;
+			}
 		}
 
 		$changes_applied = true;
@@ -457,7 +497,7 @@ $group->add(new Form_Input(
 	'Adaptive start',
 	'number',
 	$pconfig['adaptivestart'],
-	['min' => 0]
+	['min' => 0, 'placeholder' => $pftimeouts['ADAPTIVE']['Start']['value']]
 ))->setHelp('When the number of state entries exceeds this value, adaptive '.
 	'scaling begins.  All timeout values are scaled linearly with factor '.
 	'(adaptive.end - number of states) / (adaptive.end - adaptive.start). '.
@@ -468,7 +508,7 @@ $group->add(new Form_Input(
 	'Adaptive end',
 	'number',
 	$pconfig['adaptiveend'],
-	['min' => 0]
+	['min' => 0, 'placeholder' => $pftimeouts['ADAPTIVE']['End']['value']]
 ))->setHelp('When reaching this number of state entries, all timeout values '.
 	'become zero, effectively purging all state entries immediately.  This '.
 	'value is used to define the scale factor, it should not actually be '.
@@ -498,7 +538,7 @@ $section->addInput(new Form_Input(
 	$pconfig['maximumtableentries'],
 	['placeholder' => pfsense_default_table_entries_size()]
 ))->setHelp('Maximum number of table entries for systems such as aliases, '.
-	'sshlockout, snort, etc, combined.%1$sNote: Leave this blank for the '.
+	'sshguard, snort, etc, combined.%1$sNote: Leave this blank for the '.
 	'default. On this system the default size is: %2$d',
 	'<br/>',
 	pfsense_default_table_entries_size());
@@ -507,7 +547,8 @@ $section->addInput(new Form_Input(
 	'maximumfrags',
 	'Firewall Maximum Fragment Entries',
 	'text',
-	$pconfig['maximumfrags']
+	$pconfig['maximumfrags'],
+	['placeholder' => 5000]
 ))->setHelp('Maximum number of packet fragments to hold for reassembly by scrub rules. Leave this blank for the default (5000)');
 
 $section->addInput(new Form_Checkbox(
@@ -545,6 +586,13 @@ $section->addInput(new Form_Checkbox(
 ))->setHelp('With Multi-WAN it is generally desired to ensure traffic reaches directly '.
 	'connected networks and VPN networks when using policy routing. This can be disabled '.
 	'for special purposes but it requires manually creating rules for these networks.');
+
+$section->addInput(new Form_Checkbox(
+	'no_apipa_block',
+	'Allow APIPA',
+	'Allow APIPA traffic',
+	$pconfig['no_apipa_block']
+))->setHelp('Normally this traffic is dropped by the firewall, as APIPA traffic cannot be routed, but some providers may utilize APIPA space for interconnect interfaces.');
 
 $section->addInput(new Form_Input(
 	'aliasesresolveinterval',
@@ -661,48 +709,19 @@ if (count($config['interfaces']) > 1) {
 
 $section = new Form_Section('State Timeouts (seconds - blank for default)');
 
-$tcpTimeouts = array('First', 'Opening', 'Established', 'Closing', 'FIN Wait', 'Closed');
-foreach ($tcpTimeouts as $name) {
-	$keyname = 'tcp'. strtolower(str_replace(" ", "", $name)) .'timeout';
-	$section->addInput(new Form_Input(
-		$keyname,
-		'TCP '. $name,
-		'number',
-		$config['system'][$keyname]
-	));
-}
-
-$udpTimeouts = array('First', 'Single', 'Multiple');
-foreach ($udpTimeouts as $name) {
-	$keyname = 'udp'. strtolower(str_replace(" ", "", $name)) .'timeout';
-	$section->addInput(new Form_Input(
-		$keyname,
-		'UDP '. $name,
-		'number',
-		$config['system'][$keyname]
-	));
-}
-
-$icmpTimeouts = array('First', 'Error');
-foreach ($icmpTimeouts as $name) {
-	$keyname = 'icmp'. strtolower(str_replace(" ", "", $name)) .'timeout';
-	$section->addInput(new Form_Input(
-		$keyname,
-		'ICMP '. $name,
-		'number',
-		$config['system'][$keyname]
-	));
-}
-
-$otherTimeouts = array('First', 'Single', 'Multiple');
-foreach ($otherTimeouts as $name) {
-	$keyname = 'other'. strtolower(str_replace(" ", "", $name)) .'timeout';
-	$section->addInput(new Form_Input(
-		$keyname,
-		'Other '. $name,
-		'number',
-		$config['system'][$keyname]
-	));
+foreach ($pftimeouts as $proto => $tm) {
+	foreach ($tm as $type => $item) {
+		$section->addInput(new Form_Input(
+			$item['keyname'],
+			$item['name'],
+			'number',
+			$config['system'][$keyname],
+			['placeholder' => $item['value']]
+		));
+	}
+	if ($item['keyname'] == 'othermultipletimeout') {
+		break;
+	}
 }
 
 $form->add($section);
@@ -710,6 +729,11 @@ $form->add($section);
 print $form;
 
 ?></div>
+
+<div class="infoblock">
+	<?php print_info_box(gettext('You need to reload this page after changing the Firewall Optimization Options to see the actual timeout values.'), 'info', false); ?>
+</div>
+
 <script type="text/javascript">
 //<![CDATA[
 events.push(function() {
@@ -740,6 +764,10 @@ events.push(function() {
 	// ---------- On initial page load ------------------------------------------------------------
 
 	setOptText($('#optimization').val())
+
+	if (<?=(int)$show_reboot_msg?> && confirm("<?=$reboot_msg?>")) {
+		postSubmit({override : 'yes'}, 'diag_reboot.php')
+	}
 });
 //]]>
 </script>

@@ -3,7 +3,9 @@
  * system.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -50,6 +52,14 @@ if (!isset($config['system']['webgui']['dashboardcolumns'])) {
 // set default language if unset
 if (!isset($config['system']['language'])) {
 	$config['system']['language'] = $g['language'];
+}
+
+$dnshost_counter = 1;
+
+while (isset($config["system"]["dns{$dnshost_counter}host"])) {
+	$pconfig_dnshost_counter = $dnshost_counter - 1;
+	$pconfig["dnshost{$pconfig_dnshost_counter}"] = $config["system"]["dns{$dnshost_counter}host"];
+	$dnshost_counter++;
 }
 
 $dnsgw_counter = 1;
@@ -131,7 +141,7 @@ foreach ($timezonedesc as $idx => $desc) {
 		$direction_str = gettext('BEHIND');
 		break;
 	default:
-		continue;
+		continue 2;
 	}
 
 	$hr_offset = substr($desc, 8);
@@ -139,11 +149,14 @@ foreach ($timezonedesc as $idx => $desc) {
 	    sprintf(ngettext('(%1$s hour %2$s GMT)', '(%1$s hours %2$s GMT)', intval($hr_offset)), $hr_offset, $direction_str);
 }
 
-$multiwan = false;
+$multiwan = 0;
 $interfaces = get_configured_interface_list();
 foreach ($interfaces as $interface) {
 	if (interface_has_gateway($interface)) {
-		$multiwan = true;
+		$multiwan++;
+		if ($multiwan > 1) {
+			break;
+		}
 	}
 }
 
@@ -169,7 +182,7 @@ if ($_POST) {
 			}
 		}
 	}
-	if ($_POST['domain'] && !is_domain($_POST['domain'])) {
+	if ($_POST['domain'] && (!is_domain($_POST['domain'], false, false))) {
 		$input_errors[] = gettext("The domain may only contain the characters a-z, 0-9, '-' and '.'.");
 	}
 	validate_webguicss_field($input_errors, $_POST['webguicss']);
@@ -184,11 +197,15 @@ if ($_POST) {
 
 	while (isset($_POST[$dnsname])) {
 		$dnsgwname = "dnsgw{$dnscounter}";
+		$dnshostname = "dnshost{$dnscounter}";
 		$dnslist[] = $_POST[$dnsname];
 
 		if (($_POST[$dnsname] && !is_ipaddr($_POST[$dnsname]))) {
 			$input_errors[] = sprintf(gettext("A valid IP address must be specified for DNS server %s."), $dnscounter+1);
 		} else {
+			if (!empty($_POST[$dnshostname]) && !is_hostname($_POST[$dnshostname])) {
+				$input_errors[] = sprintf(gettext('The hostname provided for DNS server "%1$s" is not valid.'), $_POST[$dnsname]);
+			}
 			if (($_POST[$dnsgwname] <> "") && ($_POST[$dnsgwname] <> "none")) {
 				// A real gateway has been selected.
 				if (is_ipaddr($_POST[$dnsname])) {
@@ -221,7 +238,7 @@ if ($_POST) {
 		if ($_POST[$dnsgwname] && ($_POST[$dnsgwname] <> "none")) {
 			foreach ($direct_networks_list as $direct_network) {
 				if (ip_in_subnet($_POST[$dnsname], $direct_network)) {
-					$input_errors[] = sprintf(gettext("A gateway can not be assigned to DNS '%s' server which is on a directly connected network."), $_POST[$dnsname]);
+					$input_errors[] = sprintf(gettext("A gateway cannot be specified for %s because that IP address is part of a directly connected subnet %s. To use that nameserver, change its Gateway to `none`."), $_POST[$dnsname], $direct_network);
 				}
 			}
 		}
@@ -233,8 +250,8 @@ if ($_POST) {
 	$_POST['timeservers'] = preg_replace('/[[:blank:]]+/', ' ', $_POST['timeservers']);
 	$_POST['timeservers'] = trim($_POST['timeservers']);
 	foreach (explode(' ', $_POST['timeservers']) as $ts) {
-		if (!is_domain($ts)) {
-			$input_errors[] = gettext("A NTP Time Server name may only contain the characters a-z, 0-9, '-' and '.'.");
+		if (!is_domain($ts) && (!is_ipaddr($ts))) {
+			$input_errors[] = gettext("NTP Time Server names must be valid domain names, IPv4 addresses, or IPv6 addresses");
 		}
 	}
 
@@ -242,6 +259,22 @@ if ($_POST) {
 		// Put the user-entered list back into place so it will be redisplayed for correction.
 		$pconfig['dnsserver'] = $dnslist;
 	} else {
+		// input validation passed, so we can proceed with removing static routes for dead DNS gateways
+		if (is_array($config['system']['dnsserver'])) {
+		  	$dns_servers_arr = $config['system']['dnsserver'];
+	 		foreach ($dns_servers_arr as $arr_index => $this_dnsserver) {
+	   			$i = (int)$arr_index + 1;
+	   			$this_dnsgw = $config['system']['dns'.$i.'gw'];
+				unset($gatewayip);
+				unset($inet6);
+				if ((!empty($this_dnsgw)) && ($this_dnsgw != 'none') && (!empty($this_dnsserver))) {
+					$gatewayip = lookup_gateway_ip_by_name($this_dnsgw);
+					$inet6 = is_ipaddrv6($gatewayip) ? '-inet6 ' : '';
+					mwexec("/sbin/route -q delete -host {$inet6}{$this_dnsserver} " . escapeshellarg($gatewayip));
+				}
+			}
+		}
+
 		update_if_changed("hostname", $config['system']['hostname'], $_POST['hostname']);
 		update_if_changed("domain", $config['system']['domain'], $_POST['domain']);
 		update_if_changed("timezone", $config['system']['timezone'], $_POST['timezone']);
@@ -350,22 +383,29 @@ if ($_POST) {
 		while (isset($_POST[$dnsname])) {
 			// The $_POST array key of the corresponding gateway (starts from 0)
 			$dnsgwname = "dnsgw{$dnscounter}";
-			// The numbering of DNS GW entries in the config starts from 1
+			$dnshostname = "dnshost{$dnscounter}";
+			// The numbering of DNS GW/host entries in the config starts from 1
 			$dnsgwconfigcounter = $dnscounter + 1;
+			$dnshostconfigcounter = $dnscounter + 1;
 			// So this is the array key of the DNS GW entry in $config['system']
 			$dnsgwconfigname = "dns{$dnsgwconfigcounter}gw";
+			$dnshostconfigname = "dns{$dnshostconfigcounter}host";
 
 			$olddnsgwname = $config['system'][$dnsgwconfigname];
+			$olddnshostname = $config['system'][$dnshostconfigname];
 
 			if ($ignore_posted_dnsgw[$dnsgwname]) {
 				$thisdnsgwname = "none";
 			} else {
 				$thisdnsgwname = $pconfig[$dnsgwname];
 			}
+			$thisdnshostname = $pconfig[$dnshostname];
 
 			// "Blank" out the settings for this index, then we set them below using the "outdnscounter" index.
 			$config['system'][$dnsgwconfigname] = "none";
 			$pconfig[$dnsgwname] = "none";
+			$config['system'][$dnshostconfigname] = "";
+			$pconfig[$dnshostname] = "";
 			$pconfig[$dnsname] = "";
 
 			if ($_POST[$dnsname]) {
@@ -377,10 +417,15 @@ if ($_POST) {
 				$outdnsname = "dns{$outdnscounter}";
 				// The $pconfig array key of the corresponding gateway (starts from 0)
 				$outdnsgwname = "dnsgw{$outdnscounter}";
-				// The numbering of DNS GW entries in the config starts from 1
+				// The $pconfig array key of the corresponding hostname (starts from 0)
+				$outdnshostname = "dnshost{$outdnscounter}";
+
+				// The numbering of DNS GW/host entries in the config starts from 1
 				$outdnsgwconfigcounter = $outdnscounter + 1;
+				$outdnshostconfigcounter = $outdnscounter + 1;
 				// So this is the array key of the output DNS GW entry in $config['system']
 				$outdnsgwconfigname = "dns{$outdnsgwconfigcounter}gw";
+				$outdnshostconfigname = "dns{$outdnshostconfigcounter}host";
 
 				$pconfig[$outdnsname] = $_POST[$dnsname];
 				if ($_POST[$dnsgwname]) {
@@ -391,22 +436,34 @@ if ($_POST) {
 					unset($config['system'][$outdnsgwconfigname]);
 					$pconfig[$outdnsgwname] = "";
 				}
-				$outdnscounter++;
-			}
-			if (($olddnsgwname != "") && ($olddnsgwname != "none") && (($olddnsgwname != $thisdnsgwname) || ($olddnsservers[$dnscounter] != $_POST[$dnsname]))) {
-				// A previous DNS GW name was specified. It has now gone or changed, or the DNS server address has changed.
-				// Remove the route. Later calls will add the correct new route if needed.
-				if (is_ipaddrv4($olddnsservers[$dnscounter])) {
-					mwexec("/sbin/route delete " . escapeshellarg($olddnsservers[$dnscounter-1]));
-				} else if (is_ipaddrv6($olddnsservers[$dnscounter])) {
-					mwexec("/sbin/route delete -inet6 " . escapeshellarg($olddnsservers[$dnscounter-1]));
+				if ($_POST[$dnshostname]) {
+					$config['system'][$outdnshostconfigname] = $thisdnshostname;
+					$pconfig[$outdnshostname] = $thisdnshostname;
+				} else {
+					// Note: when no DNS hostname is chosen, unset the value.
+					unset($config['system'][$outdnshostconfigname]);
+					$pconfig[$outdnshostname] = "";
 				}
+				$outdnscounter++;
 			}
 
 			$dnscounter++;
 			// The $_POST array key of the DNS IP (starts from 0)
 			$dnsname = "dns{$dnscounter}";
 		}
+
+		// clean up dnsgw orphans
+		$oldgwcounter = 1;
+		$olddnsgwconfigname = "dns{$oldgwcounter}gw";
+		while (isset($config['system'][$olddnsgwconfigname])) {
+			if (empty($config['system']['dnsserver'][$oldgwcounter - 1])) {
+				unset($config['system'][$olddnsgwconfigname]);
+			}
+			$oldgwcounter++;
+			$olddnsgwconfigname = "dns{$oldgwcounter}gw";
+		}
+		unset($oldgwcounter);
+		unset($olddnsgwconfigname);
 
 		if ($changecount > 0) {
 			write_config($changedesc);
@@ -485,6 +542,7 @@ $dnsserver_count = count($pconfig['dnsserver']);
 $dnsserver_num = 0;
 $dnsserver_help = gettext("Address") . '<br/>' . gettext("Enter IP addresses to be used by the system for DNS resolution.") . " " .
 	gettext("These are also used for the DHCP service, DNS Forwarder and DNS Resolver when it has DNS Query Forwarding enabled.");
+$dnshost_help = gettext("Hostname") . '<br/>' . gettext("Enter the DNS Server Hostname for TLS Verification in the DNS Resolver (optional).");
 $dnsgw_help = gettext("Gateway") . '<br/>'. gettext("Optionally select the gateway for each DNS server.") . " " .
 	gettext("When using multiple WAN connections there should be at least one unique DNS server per gateway.");
 
@@ -495,7 +553,7 @@ if ($dnsserver_count == 0) {
 
 foreach ($pconfig['dnsserver'] as $dnsserver) {
 
-	$is_last_dnsserver = ($dnsserver_num == $dnsserver_count - 1);
+	$is_last_dnsserver = (($dnsserver_num == $dnsserver_count - 1) || $dnsserver_count == 0);
 	$group = new Form_Group($dnsserver_num == 0 ? 'DNS Servers':'');
 	$group->addClass('repeatable');
 
@@ -506,7 +564,14 @@ foreach ($pconfig['dnsserver'] as $dnsserver) {
 		$dnsserver
 	))->setHelp(($is_last_dnsserver) ? $dnsserver_help:null);
 
-	if ($multiwan)	{
+	$group->add(new Form_Input(
+		'dnshost' . $dnsserver_num,
+		'DNS Hostname',
+		'text',
+		$pconfig['dnshost' . $dnsserver_num]
+	))->setHelp(($is_last_dnsserver) ? $dnshost_help:null);
+
+	if ($multiwan > 1) {
 		$options = array('none' => 'none');
 
 		foreach ($arr_gateways as $gwname => $gwitem) {
@@ -526,7 +591,7 @@ foreach ($pconfig['dnsserver'] as $dnsserver) {
 			'Gateway',
 			$pconfig['dnsgw' . $dnsserver_num],
 			$options
-		))->setHelp(($is_last_dnsserver) ? $dnsgw_help:null);;
+		))->setWidth(4)->setHelp(($is_last_dnsserver) ? $dnsgw_help:null);
 	}
 
 	$group->add(new Form_Button(
@@ -534,7 +599,7 @@ foreach ($pconfig['dnsserver'] as $dnsserver) {
 		'Delete',
 		null,
 		'fa-trash'
-	))->addClass('btn-warning');
+	))->setWidth(2)->addClass('btn-warning');
 
 	$section->add($group);
 	$dnsserver_num++;
@@ -616,7 +681,7 @@ gen_disablealiaspopupdetail_field($section, $pconfig['disablealiaspopupdetail'])
 $section->addInput(new Form_Checkbox(
 	'roworderdragging',
 	'Disable dragging',
-	'Disable dragging of firewall/nat rules.',
+	'Disable dragging of firewall/NAT rules',
 	$pconfig['roworderdragging']
 ))->setHelp('Disables dragging rows to allow selecting and copying row contents and avoid accidental changes.');
 
@@ -624,9 +689,11 @@ $section->addInput(new Form_Select(
 	'logincss',
 	'Login page color',
 	$pconfig['logincss'],
-	["1e3f75;" => gettext("Blue"), "003300" => gettext("Green"), "770101" => gettext("Red"),
+	["1e3f75;" => gettext("Dark Blue"), "003300" => gettext("Dark green"), "770101" => gettext("Crimson red"),
 	 "4b1263" => gettext("Purple"), "424142" => gettext("Gray"), "333333" => gettext("Dark gray"),
-	 "633215" => gettext("Brown" ), "bf7703" => gettext("Orange")]
+	 "000000" => gettext("Black"), "633215" => gettext("Dark brown"), "bf7703" => gettext("Brown"), 
+	 "008000" => gettext("Green"), "007faa" => gettext("Light Blue"), "dc2a2a" => gettext("Red"),
+	 "9b59b6" => gettext("Violet")]
 ))->setHelp('Choose a color for the login page');
 
 $section->addInput(new Form_Checkbox(

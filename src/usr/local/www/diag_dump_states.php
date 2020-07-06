@@ -3,7 +3,9 @@
  * diag_dump_states.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2005 Colin Smith
  * All rights reserved.
  *
@@ -211,7 +213,8 @@ print $form;
 		$arr[] = array("filter" => $_POST['filter']);
 	}
 
-	if (isset($_POST['filter']) || !isset($config['system']['webgui']['requirestatefilter'])) {
+	if (isset($_POST['filter']) || isset($_REQUEST['ruleid']) ||
+	    !isset($config['system']['webgui']['requirestatefilter'])) {
 		if (count($arr) > 0) {
 			$res = pfSense_get_pf_states($arr);
 		} else {
@@ -226,7 +229,7 @@ print $form;
 		$states = count($res);
 	}
 
-	for ($i = 0; $i < $states; $i++) {
+	for ($i = 0; $i < $states; $i++):
 		$info = $res[$i]['src'];
 		$srcip = get_ip($res[$i]['src']);
 		$dstip = get_ip($res[$i]['dst']);
@@ -258,8 +261,8 @@ print $form;
 								title="<?=sprintf(gettext('Remove all state entries from %1$s to %2$s'), $srcip, $killdstip);?>"></a>
 						</td>
 					</tr>
-<?
-	}
+<?php
+	endfor;
 ?>
 				</tbody>
 			</table>
@@ -271,7 +274,8 @@ print $form;
 if ($states == 0) {
 	if (isset($_POST['filter']) && !empty($_POST['filter'])) {
 		$errmsg = gettext('No states were found that match the current filter.');
-	} else if (!isset($_POST['filter']) && isset($config['system']['webgui']['requirestatefilter'])) {
+	} else if (!isset($_POST['filter']) && !isset($_REQUEST['ruleid']) &&
+	    isset($config['system']['webgui']['requirestatefilter'])) {
 		$errmsg = gettext('State display suppressed without filter submission. '.
 		'See System > General Setup, Require State Filter.');
 	} else {

@@ -3,7 +3,9 @@
  * services.inc
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally part of m0n0wall (http://m0n0.ch/wall)
@@ -24,8 +26,8 @@
  */
 
 
-define('DYNDNS_PROVIDER_VALUES', 'all-inkl azure azurev6 citynetwork cloudflare cloudflare-v6 cloudns custom custom-v6 digitalocean dnsexit dnsimple dnsmadeeasy dnsomatic dreamhost dreamhost-v6 duiadns duiadns-v6 dyndns dyndns-custom dyndns-static dyns easydns eurodns freedns freedns-v6 glesys godaddy godaddy-v6 googledomains gratisdns he-net he-net-v6 he-net-tunnelbroker hover loopia namecheap noip noip-free ods opendns ovh-dynhost route53 route53-v6 selfhost spdyn spdyn-v6 zoneedit');
-define('DYNDNS_PROVIDER_DESCRIPTIONS', 'All-Inkl.com,Azure DNS,Azure DNS (v6),City Network,Cloudflare,Cloudflare (v6),ClouDNS,Custom,Custom (v6),DigitalOcean,DNSexit,DNSimple,DNS Made Easy,DNS-O-Matic,DreamHost,Dreamhost (v6),DuiaDns.net,DuiaDns.net (v6),DynDNS (dynamic),DynDNS (custom),DynDNS (static),DyNS,easyDNS,Euro Dns,freeDNS,freeDNS (v6),GleSYS,GoDaddy,GoDaddy (v6),Google Domains,GratisDNS,HE.net,HE.net (v6),HE.net Tunnelbroker,Hover,Loopia,Namecheap,No-IP,No-IP (free),ODS.org,OpenDNS,OVH DynHOST,Route 53,Route 53 (v6),SelfHost,SPDYN,SPDYN (v6),ZoneEdit');
+define('DYNDNS_PROVIDER_VALUES', 'all-inkl azure azurev6 citynetwork cloudflare cloudflare-v6 cloudns custom custom-v6 digitalocean digitalocean-v6 dnsexit dnsimple dnsmadeeasy dnsomatic dreamhost dreamhost-v6 duiadns duiadns-v6 dyndns dyndns-custom dyndns-static dyns dynv6 dynv6-v6 easydns eurodns freedns freedns-v6 freedns2 freedns2-v6 glesys gandi-livedns godaddy godaddy-v6 googledomains gratisdns he-net he-net-v6 he-net-tunnelbroker hover linode linode-v6 loopia namecheap noip noip-v6 noip-free noip-free-v6 ods opendns ovh-dynhost route53 route53-v6 selfhost spdyn spdyn-v6 zoneedit');
+define('DYNDNS_PROVIDER_DESCRIPTIONS', 'All-Inkl.com,Azure DNS,Azure DNS (v6),City Network,Cloudflare,Cloudflare (v6),ClouDNS,Custom,Custom (v6),DigitalOcean,DigitalOcean (v6),DNSexit,DNSimple,DNS Made Easy,DNS-O-Matic,DreamHost,Dreamhost (v6),DuiaDns.net,DuiaDns.net (v6),DynDNS (dynamic),DynDNS (custom),DynDNS (static),DyNS,Dynv6,Dynv6 (v6),easyDNS,Euro Dns,freeDNS,freeDNS (v6),freeDNS API Version 2, freeDNS API Version 2 (v6),GleSYS,Gandi Live DNS,GoDaddy,GoDaddy (v6),Google Domains,GratisDNS,HE.net,HE.net (v6),HE.net Tunnelbroker,Hover,Linode,Linode (v6),Loopia,Namecheap,No-IP,No-IP (v6),No-IP (free),No-IP (free-v6),ODS.org,OpenDNS,OVH DynHOST,Route 53,Route 53 (v6),SelfHost,SPDYN,SPDYN (v6),ZoneEdit');
 
 /* implement ipv6 route advertising daemon */
 function services_radvd_configure($blacklist = array()) {
@@ -156,7 +158,12 @@ function services_radvd_configure($blacklist = array()) {
 				$radvdconf .= "\tAdvOtherConfigFlag on;\n";
 				break;
 		}
-		$radvdconf .= "\tprefix {$subnetv6}/{$ifcfgsnv6} {\n";
+		if ($dhcpv6ifconf['ramode'] == "unmanaged") {
+			$prefixnet = $ifcfgipv6;
+		} else {
+			$prefixnet = $subnetv6;
+		}
+		$radvdconf .= "\tprefix {$prefixnet}/{$ifcfgsnv6} {\n";
 		if ($racarpif == true) {
 			$radvdconf .= "\t\tDeprecatePrefix off;\n";
 		} else {
@@ -166,18 +173,15 @@ function services_radvd_configure($blacklist = array()) {
 			case "managed":
 				$radvdconf .= "\t\tAdvOnLink on;\n";
 				$radvdconf .= "\t\tAdvAutonomous off;\n";
-				$radvdconf .= "\t\tAdvRouterAddr on;\n";
 				break;
 			case "router":
 				$radvdconf .= "\t\tAdvOnLink off;\n";
 				$radvdconf .= "\t\tAdvAutonomous off;\n";
-				$radvdconf .= "\t\tAdvRouterAddr on;\n";
 				break;
 			case "stateless_dhcp":
 			case "assist":
 				$radvdconf .= "\t\tAdvOnLink on;\n";
 				$radvdconf .= "\t\tAdvAutonomous on;\n";
-				$radvdconf .= "\t\tAdvRouterAddr on;\n";
 				break;
 			case "unmanaged":
 				$radvdconf .= "\t\tAdvOnLink on;\n";
@@ -209,22 +213,18 @@ function services_radvd_configure($blacklist = array()) {
 						case "managed":
 							$radvdconf .= "\t\tAdvOnLink on;\n";
 							$radvdconf .= "\t\tAdvAutonomous off;\n";
-							$radvdconf .= "\t\tAdvRouterAddr on;\n";
 							break;
 						case "router":
 							$radvdconf .= "\t\tAdvOnLink off;\n";
 							$radvdconf .= "\t\tAdvAutonomous off;\n";
-							$radvdconf .= "\t\tAdvRouterAddr on;\n";
 							break;
 						case "assist":
 							$radvdconf .= "\t\tAdvOnLink on;\n";
 							$radvdconf .= "\t\tAdvAutonomous on;\n";
-							$radvdconf .= "\t\tAdvRouterAddr on;\n";
 							break;
 						case "unmanaged":
 							$radvdconf .= "\t\tAdvOnLink on;\n";
 							$radvdconf .= "\t\tAdvAutonomous on;\n";
-							$radvdconf .= "\t\tAdvRouterAddr on;\n";
 							break;
 					}
 					$radvdconf .= "\t};\n";
@@ -247,50 +247,52 @@ function services_radvd_configure($blacklist = array()) {
 		$radvdconf .= "\t};\n";
 
 		/* add DNS servers */
-		$dnslist = array();
-		if (isset($dhcpv6ifconf['rasamednsasdhcp6']) && is_array($dhcpv6ifconf['dnsserver']) && !empty($dhcpv6ifconf['dnsserver'])) {
-			foreach ($dhcpv6ifconf['dnsserver'] as $server) {
-				if (is_ipaddrv6($server)) {
-					$dnslist[] = $server;
+		if ($dhcpv6ifconf['radvd-dns'] != 'disabled') {
+			$dnslist = array();
+			if (isset($dhcpv6ifconf['rasamednsasdhcp6']) && is_array($dhcpv6ifconf['dnsserver']) && !empty($dhcpv6ifconf['dnsserver'])) {
+				foreach ($dhcpv6ifconf['dnsserver'] as $server) {
+					if (is_ipaddrv6($server)) {
+						$dnslist[] = $server;
+					}
+				}
+			} elseif (!isset($dhcpv6ifconf['rasamednsasdhcp6']) && isset($dhcpv6ifconf['radnsserver']) && is_array($dhcpv6ifconf['radnsserver'])) {
+				foreach ($dhcpv6ifconf['radnsserver'] as $server) {
+					if (is_ipaddrv6($server)) {
+						$dnslist[] = $server;
+					}
+				}
+			} elseif (isset($config['dnsmasq']['enable']) || isset($config['unbound']['enable'])) {
+				$dnslist[] = get_interface_ipv6($realif);
+			} elseif (is_array($config['system']['dnsserver']) && !empty($config['system']['dnsserver'])) {
+				foreach ($config['system']['dnsserver'] as $server) {
+					if (is_ipaddrv6($server)) {
+						$dnslist[] = $server;
+					}
 				}
 			}
-		} elseif (!isset($dhcpv6ifconf['rasamednsasdhcp6']) && isset($dhcpv6ifconf['radnsserver']) && is_array($dhcpv6ifconf['radnsserver'])) {
-			foreach ($dhcpv6ifconf['radnsserver'] as $server) {
-				if (is_ipaddrv6($server)) {
-					$dnslist[] = $server;
+			if (count($dnslist) > 0) {
+				$dnsstring = implode(" ", $dnslist);
+				if ($dnsstring <> "") {
+					$radvdconf .= "\tRDNSS {$dnsstring} { };\n";
 				}
 			}
-		} elseif (isset($config['dnsmasq']['enable']) || isset($config['unbound']['enable'])) {
-			$dnslist[] = get_interface_ipv6($realif);
-		} elseif (is_array($config['system']['dnsserver']) && !empty($config['system']['dnsserver'])) {
-			foreach ($config['system']['dnsserver'] as $server) {
-				if (is_ipaddrv6($server)) {
-					$dnslist[] = $server;
-				}
-			}
-		}
-		if (count($dnslist) > 0) {
-			$dnsstring = implode(" ", $dnslist);
-			if ($dnsstring <> "") {
-				$radvdconf .= "\tRDNSS {$dnsstring} { };\n";
-			}
-		}
 
-		$searchlist = array();
-		$domainsearchlist = explode(';', $dhcpv6ifconf['radomainsearchlist']);
-		foreach ($domainsearchlist as $sd) {
-			$sd = trim($sd);
-			if (is_hostname($sd)) {
-				$searchlist[] = $sd;
+			$searchlist = array();
+			$domainsearchlist = explode(';', $dhcpv6ifconf['radomainsearchlist']);
+			foreach ($domainsearchlist as $sd) {
+				$sd = trim($sd);
+				if (is_hostname($sd)) {
+					$searchlist[] = $sd;
+				}
 			}
-		}
-		if (count($searchlist) > 0) {
-			$searchliststring = trim(implode(" ", $searchlist));
-		}
-		if (!empty($dhcpv6ifconf['domain'])) {
-			$radvdconf .= "\tDNSSL {$dhcpv6ifconf['domain']} {$searchliststring} { };\n";
-		} elseif (!empty($config['system']['domain'])) {
-			$radvdconf .= "\tDNSSL {$config['system']['domain']} {$searchliststring} { };\n";
+			if (count($searchlist) > 0) {
+				$searchliststring = trim(implode(" ", $searchlist));
+			}
+			if (!empty($dhcpv6ifconf['domain'])) {
+				$radvdconf .= "\tDNSSL {$dhcpv6ifconf['domain']} {$searchliststring} { };\n";
+			} elseif (!empty($config['system']['domain'])) {
+				$radvdconf .= "\tDNSSL {$config['system']['domain']} {$searchliststring} { };\n";
+			}
 		}
 		$radvdconf .= "};\n";
 	}
@@ -363,28 +365,29 @@ function services_radvd_configure($blacklist = array()) {
 		$radvdconf .= "\tprefix {$subnetv6}/{$ifcfgsnv6} {\n";
 		$radvdconf .= "\t\tAdvOnLink on;\n";
 		$radvdconf .= "\t\tAdvAutonomous on;\n";
-		$radvdconf .= "\t\tAdvRouterAddr on;\n";
 		$radvdconf .= "\t};\n";
 
 		/* add DNS servers */
-		$dnslist = array();
-		if (isset($config['dnsmasq']['enable']) || isset($config['unbound']['enable'])) {
-			$dnslist[] = $ifcfgipv6;
-		} elseif (is_array($config['system']['dnsserver']) && !empty($config['system']['dnsserver'])) {
-			foreach ($config['system']['dnsserver'] as $server) {
-				if (is_ipaddrv6($server)) {
-					$dnslist[] = $server;
+		if ($dhcpv6ifconf['radvd-dns'] != 'disabled') {
+			$dnslist = array();
+			if (isset($config['dnsmasq']['enable']) || isset($config['unbound']['enable'])) {
+				$dnslist[] = $ifcfgipv6;
+			} elseif (is_array($config['system']['dnsserver']) && !empty($config['system']['dnsserver'])) {
+				foreach ($config['system']['dnsserver'] as $server) {
+					if (is_ipaddrv6($server)) {
+						$dnslist[] = $server;
+					}
 				}
 			}
-		}
-		if (count($dnslist) > 0) {
-			$dnsstring = implode(" ", $dnslist);
-			if (!empty($dnsstring)) {
-				$radvdconf .= "\tRDNSS {$dnsstring} { };\n";
+			if (count($dnslist) > 0) {
+				$dnsstring = implode(" ", $dnslist);
+				if (!empty($dnsstring)) {
+					$radvdconf .= "\tRDNSS {$dnsstring} { };\n";
+				}
 			}
-		}
-		if (!empty($config['system']['domain'])) {
-			$radvdconf .= "\tDNSSL {$config['system']['domain']} { };\n";
+			if (!empty($config['system']['domain'])) {
+				$radvdconf .= "\tDNSSL {$config['system']['domain']} { };\n";
+			}
 		}
 		$radvdconf .= "};\n";
 	}
@@ -479,19 +482,6 @@ function services_dhcpdv4_configure() {
 		return 0;
 	}
 
-	/* if OLSRD is enabled, allow WAN to house DHCP. */
-	if (!function_exists('is_package_installed')) {
-		require_once('pkg-utils.inc');
-	}
-	if (is_package_installed('olsrd') && isset($config['installedpackages']['olsrd'])) {
-		foreach ($config['installedpackages']['olsrd']['config'] as $olsrd) {
-			if (isset($olsrd['enable']) && $olsrd['enable'] == "on") {
-				$is_olsr_enabled = true;
-				break;
-			}
-		}
-	}
-
 	$syscfg = $config['system'];
 	if (!is_array($config['dhcpd'])) {
 		$config['dhcpd'] = array();
@@ -541,6 +531,22 @@ function services_dhcpdv4_configure() {
 				}
 			}
 		}
+		if (is_array($dhcpifconf['staticmap'])) {
+			$i = 0;
+			foreach ($dhcpifconf['staticmap'] as $sm) {
+				if (is_array($sm['numberoptions']) && is_array($sm['numberoptions']['item'])) {
+					foreach ($sm['numberoptions']['item'] as $itemidx => $item) {
+						if (!empty($item['type'])) {
+							$itemtype = $item['type'];
+						} else {
+							$itemtype = "text";
+						}
+						$custoptions .= "option custom-s_{$dhcpif}_{$i}-{$itemidx} code {$item['number']} = {$itemtype};\n";
+					}
+				}
+				$i++;
+			}
+		}
 	}
 
 	$dhcpdconf = <<<EOD
@@ -555,7 +561,6 @@ max-lease-time 86400;
 log-facility local7;
 one-lease-per-client true;
 deny duplicates;
-ping-check true;
 update-conflict-detection false;
 
 EOD;
@@ -566,6 +571,20 @@ EOD;
 
 	if (isset($dhcpifconf['alwaysbroadcast'])) {
 		$dhcpdconf .= "always-broadcast on\n";
+	}
+
+	// OMAPI Settings
+	if (isset($dhcpifconf['omapi_port']) && is_numeric($dhcpifconf['omapi_port'])) {
+		$dhcpdconf .= <<<EOD
+
+key omapi_key {
+  algorithm {$dhcpifconf['omapi_key_algorithm']};
+  secret "{$dhcpifconf['omapi_key']}";
+};
+omapi-port {$dhcpifconf['omapi_port']};
+omapi-key omapi_key;
+
+EOD;
 	}
 
 	$dhcpdifs = array();
@@ -672,12 +691,6 @@ EOPP;
 			continue;
 		}
 
-		if ($is_olsr_enabled == true) {
-			if ($dhcpifconf['netmask']) {
-				$subnetmask = gen_subnet_mask($dhcpifconf['netmask']);
-			}
-		}
-
 		$all_pools = array();
 		$all_pools[] = $dhcpifconf;
 		if (is_array($dhcpifconf['pool'])) {
@@ -714,23 +727,13 @@ EOPP;
 
 			$revsubnet = array_reverse(explode('.',$subnet));
 
-			/* Take care of full classes first */
-			switch ($ifcfgsn) {
-				case 8:
-					$start_octet = 3;
-					break;
-				case 16:
-					$start_octet = 2;
-					break;
-				case 24:
-					$start_octet = 1;
-					break;
-				default:
-					$start_octet = 0;
-					/* Add subnet bitmask to first octet */
-					$revsubnet[0] .= '-' . $ifcfgsn;
-					break;
-
+			$subnet_mask_bits = 32 - $ifcfgsn;
+			$start_octet = $subnet_mask_bits >> 3;
+			$octet_mask_bits = $subnet_mask_bits & ($subnet_mask_bits % 8);
+			if ($octet_mask_bits) {
+			    $octet_mask = (1 << $octet_mask_bits) - 1;
+			    $octet_start = $revsubnet[$start_octet] & ~$octet_mask;
+			    $revsubnet[$start_octet] = $octet_start . "-" . ($octet_start + $octet_mask);
 			}
 
 			$ptr_domain = '';
@@ -788,6 +791,9 @@ EOPP;
 				$dhcpdconf .= '}' . "\n";
 			}
 		}
+
+		// instantiate class before pool definition
+		$dhcpdconf .= "class \"s_{$dhcpif}\" {\n	match pick-first-value (option dhcp-client-identifier, hardware);\n}\n";
 
 		$dhcpdconf .= "subnet {$subnet} netmask {$subnetmask} {\n";
 
@@ -860,8 +866,16 @@ EOPP;
 				$dhcpdconf .= "		$deny_action dynamic bootp clients;\n";
 			}
 
+			// set pool MAC limitations
 			if (isset($poolconf['denyunknown'])) {
-				$dhcpdconf .= "		$deny_action unknown-clients;\n";
+				if ($poolconf['denyunknown'] == "class") {
+					$dhcpdconf .= "		allow members of \"s_{$dhcpif}\";\n";
+					$dhcpdconf .= "		$deny_action unknown-clients;\n";
+				} else if ($poolconf['denyunknown'] == "disabled") {
+					// add nothing to $dhcpdconf; condition added to prevent next condition applying if ever engine changes such that: isset("disabled") == true
+				} else {	// "catch-all" covering "enabled" value post-PR#4066, and covering non-upgraded boolean option (i.e. literal value "enabled")
+					$dhcpdconf .= "		$deny_action unknown-clients;\n";
+				}
 			}
 
 			if ($poolconf['gateway'] && $poolconf['gateway'] != "none" && ($poolconf['gateway'] != $dhcpifconf['gateway'])) {
@@ -930,7 +944,7 @@ EOPP;
 			// Handle pool-specific options
 			$dhcpdconf .= "\n";
 			// Ignore the first pool, which is the "overall" pool when $all_pools_idx is 0 - those are put outside the pool block later
-			if ($poolconf['numberoptions']['item'] && ($all_pools_idx > 0)) {
+			if (isset($poolconf['numberoptions']['item']) && is_array($poolconf['numberoptions']['item']) && ($all_pools_idx > 0)) {
 				// Use the "real" pool index from the config, excluding the "overall" pool, and based from 0.
 				// This matches the way $poolidx was used when generating the $custoptions string earlier.
 				$poolidx = $all_pools_idx - 1;
@@ -970,8 +984,18 @@ EOPP;
 				    ($poolconf['filename64'] != $dhcpifconf['filename64']))) {
 					$filename64 = $poolconf['filename64'];
 				}
+				if (!empty($poolconf['filename32arm']) &&
+				    (!isset($dhcpifconf['filename32arm']) ||
+				    ($poolconf['filename32arm'] != $dhcpifconf['filename32arm']))) {
+					$filename32arm = $poolconf['filename32arm'];
+				}
+				if (!empty($poolconf['filename64arm']) &&
+				    (!isset($dhcpifconf['filename64arm']) ||
+				    ($poolconf['filename64arm'] != $dhcpifconf['filename64arm']))) {
+					$filename64arm = $poolconf['filename64arm'];
+				}
 
-				if (!empty($filename32) || !empty($filename64)) {
+				if (!empty($filename32) || !empty($filename64) || !empty($filename32arm) || !empty($filename64arm)) {
 					if (empty($filename) && !empty($dhcpifconf['filename'])) {
 						$filename = $dhcpifconf['filename'];
 					}
@@ -981,22 +1005,32 @@ EOPP;
 					if (empty($filename64) && !empty($dhcpifconf['filename64'])) {
 						$filename64 = $dhcpifconf['filename64'];
 					}
+					if (empty($filename32arm) && !empty($dhcpifconf['filename32arm'])) {
+						$filename32arm = $dhcpifconf['filename32arm'];
+					}
+					if (empty($filename64arm) && !empty($dhcpifconf['filename64arm'])) {
+						$filename64arm = $dhcpifconf['filename64arm'];
+					}
 				}
 
-				if (!empty($filename) && !empty($filename32) && !empty($filename64)) {
+				if (!empty($filename) && !empty($filename32) && !empty($filename64) && !empty($filename32arm) && !empty($filename64arm)) {
 					$dhcpdconf .= "		if option arch = 00:06 {\n";
 					$dhcpdconf .= "			filename \"{$filename32}\";\n";
 					$dhcpdconf .= "		} else if option arch = 00:07 {\n";
 					$dhcpdconf .= "			filename \"{$filename64}\";\n";
 					$dhcpdconf .= "		} else if option arch = 00:09 {\n";
 					$dhcpdconf .= "			filename \"{$filename64}\";\n";
+					$dhcpdconf .= "		} else if option arch = 00:0a {\n";
+					$dhcpdconf .= "			filename \"{$filename32arm}\";\n";
+					$dhcpdconf .= "		} else if option arch = 00:0b {\n";
+					$dhcpdconf .= "			filename \"{$filename64arm}\";\n";
 					$dhcpdconf .= "		} else {\n";
 					$dhcpdconf .= "			filename \"{$filename}\";\n";
 					$dhcpdconf .= "		}\n\n";
 				} elseif (!empty($filename)) {
 					$dhcpdconf .= "		filename \"{$filename}\";\n";
 				}
-				unset($filename, $filename32, $filename64);
+				unset($filename, $filename32, $filename64, $filename32arm, $filename64arm);
 
 				if (!empty($poolconf['rootpath']) && ($poolconf['rootpath'] != $dhcpifconf['rootpath'])) {
 					$dhcpdconf .= "		option root-path \"{$poolconf['rootpath']}\";\n";
@@ -1034,6 +1068,12 @@ EOD;
 			$dhcpdconf .= "	max-lease-time {$dhcpifconf['maxleasetime']};\n";
 		}
 
+		if (!isset($dhcpifconf['disablepingcheck'])) {
+			$dhcpdconf .= "	ping-check true;\n";
+		} else {
+			$dhcpdconf .= "	ping-check false;\n";
+		}
+
 		// netbios-name*
 		if (is_array($dhcpifconf['winsserver']) && $dhcpifconf['winsserver'][0]) {
 			$dhcpdconf .= "	option netbios-name-servers " . join(",", $dhcpifconf['winsserver']) . ";\n";
@@ -1052,7 +1092,7 @@ EOD;
 
 		// Handle option, number rowhelper values
 		$dhcpdconf .= "\n";
-		if ($dhcpifconf['numberoptions']['item']) {
+		if (isset($dhcpifconf['numberoptions']['item']) && is_array($dhcpifconf['numberoptions']['item'])) {
 			foreach ($dhcpifconf['numberoptions']['item'] as $itemidx => $item) {
 				$item_value = base64_decode($item['value']);
 				if (empty($item['type']) || $item['type'] == "text") {
@@ -1101,14 +1141,16 @@ EOD;
 
 			$i = 0;
 			foreach ($dhcpifconf['staticmap'] as $sm) {
+				$cid = '';
 				$dhcpdconf .= "host s_{$dhcpif}_{$i} {\n";
 
 				if ($sm['mac']) {
-					$dhcpdconf .= "        hardware ethernet {$sm['mac']};\n";
+					$dhcpdconf .= "	hardware ethernet {$sm['mac']};\n";
 				}
 
 				if ($sm['cid']) {
-					$dhcpdconf .= "        option dhcp-client-identifier \"{$sm['cid']}\";\n";
+					$cid = str_replace('"', '\"', $sm['cid']);
+					$dhcpdconf .= "	option dhcp-client-identifier \"{$cid}\";\n";
 				}
 
 				if ($sm['ipaddr']) {
@@ -1183,7 +1225,59 @@ EOD;
 					$dhcpdconf .= "	option tftp-server-name \"{$sm['tftp']}\";\n";
 				}
 
+				// Handle option, number rowhelper values
+				$dhcpdconf .= "\n";
+				if (isset($sm['numberoptions']['item']) && is_array($sm['numberoptions']['item'])) {
+					foreach ($sm['numberoptions']['item'] as $itemidx => $item) {
+						$item_value = base64_decode($item['value']);
+						if (empty($item['type']) || $item['type'] == "text") {
+							$dhcpdconf .= "	option custom-s_{$dhcpif}_{$i}-{$itemidx} \"{$item_value}\";\n";
+						} else {
+							$dhcpdconf .= "	option custom-s_{$dhcpif}_{$i}-{$itemidx} {$item_value};\n";
+						}
+					}
+				}
+
+				// ldap-server
+				if (!empty($sm['ldap']) && ($sm['ldap'] != $dhcpifconf['ldap'])) {
+					$dhcpdconf .= "	option ldap-server \"{$sm['ldap']}\";\n";
+				}
+
+				// net boot information
+				if (isset($sm['netboot'])) {
+					if ($sm['nextserver'] <> "") {
+						$dhcpdconf .= "	next-server {$sm['nextserver']};\n";
+					}
+					if (!empty($sm['filename']) && !empty($sm['filename32']) && !empty($sm['filename64'])) {
+						$dhcpdconf .= "	if option arch = 00:06 {\n";
+						$dhcpdconf .= "		filename \"{$sm['filename32']}\";\n";
+						$dhcpdconf .= "	} else if option arch = 00:07 {\n";
+						$dhcpdconf .= "		filename \"{$sm['filename64']}\";\n";
+						$dhcpdconf .= "	} else if option arch = 00:09 {\n";
+						$dhcpdconf .= "		filename \"{$sm['filename64']}\";\n";
+						$dhcpdconf .= "	} else {\n";
+						$dhcpdconf .= "		filename \"{$sm['filename']}\";\n";
+						$dhcpdconf .= "	}\n\n";
+					} elseif (!empty($sm['filename'])) {
+						$dhcpdconf .= "	filename \"{$sm['filename']}\";\n";
+					}
+					if (!empty($dhcpifconf['rootpath'])) {
+						$dhcpdconf .= "	option root-path \"{$sm['rootpath']}\";\n";
+					}
+				}
+
 				$dhcpdconf .= "}\n";
+
+				// subclass for DHCP limiting
+				if (!empty($sm['mac'])) {
+					// assuming ALL addresses are ethernet hardware type ("1:" prefix)
+					$dhcpdconf .= "subclass \"s_{$dhcpif}\" 1:{$sm['mac']};\n";
+				}
+				if (!empty($cid)) {
+					$dhcpdconf .= "subclass \"s_{$dhcpif}\" \"{$cid}\";\n";
+				}
+
+
 				$i++;
 			}
 		}
@@ -1191,7 +1285,7 @@ EOD;
 		$dhcpdifs[] = get_real_interface($dhcpif);
 		if ($newzone['domain-name']) {
 			if ($need_ddns_updates) {
-				$newzone['dns-servers'] = array($dhcpifconf['ddnsdomainprimary']);
+				$newzone['dns-servers'] = array($dhcpifconf['ddnsdomainprimary'], $dhcpifconf['ddnsdomainsecondary']);
 				$newzone['ddnsdomainkeyname'] = $dhcpifconf['ddnsdomainkeyname'];
 				$newzone['ddnsdomainkeyalgorithm'] = $dhcpifconf['ddnsdomainkeyalgorithm'];
 				$newzone['ddnsdomainkey'] = $dhcpifconf['ddnsdomainkey'];
@@ -1263,9 +1357,9 @@ function dhcpdzones($ddns_zones) {
 			$primary = $zone['dns-servers'][0];
 			$secondary = empty($zone['dns-servers'][1]) ? "" : $zone['dns-servers'][1];
 
-			// Make sure we aren't using any invalid or IPv6 DNS servers.
-			if (!is_ipaddrv4($primary)) {
-				if (is_ipaddrv4($secondary)) {
+			// Make sure we aren't using any invalid servers.
+			if (!is_ipaddr($primary)) {
+				if (is_ipaddr($secondary)) {
 					$primary = $secondary;
 					$secondary = "";
 				} else {
@@ -1276,9 +1370,15 @@ function dhcpdzones($ddns_zones) {
 			// We don't need to add zones multiple times.
 			if ($zone['domain-name'] && !in_array($zone['domain-name'], $added_zones)) {
 				$dhcpdconf .= "zone {$zone['domain-name']}. {\n";
-				$dhcpdconf .= "	primary {$primary};\n";
+				if (is_ipaddrv4($primary)) {
+					$dhcpdconf .= "	primary {$primary};\n";
+				} else {
+					$dhcpdconf .= "	primary6 {$primary};\n";
+				}
 				if (is_ipaddrv4($secondary)) {
 					$dhcpdconf .= "	secondary {$secondary};\n";
+				} elseif (is_ipaddrv6($secondary)) {
+					$dhcpdconf .= "	secondary6 {$secondary};\n";
 				}
 				if ($zone['ddnsdomainkeyname'] <> "" && $zone['ddnsdomainkey'] <> "") {
 					$dhcpdconf .= "	key {$zone['ddnsdomainkeyname']};\n";
@@ -1288,9 +1388,15 @@ function dhcpdzones($ddns_zones) {
 			}
 			if ($zone['ptr-domain'] && !in_array($zone['ptr-domain'], $added_zones)) {
 				$dhcpdconf .= "zone {$zone['ptr-domain']} {\n";
-				$dhcpdconf .= "	primary {$primary};\n";
+				if (is_ipaddrv4($primary)) {
+					$dhcpdconf .= "	primary {$primary};\n";
+				} else {
+					$dhcpdconf .= "	primary6 {$primary};\n";
+				}
 				if (is_ipaddrv4($secondary)) {
 					$dhcpdconf .= "	secondary {$secondary};\n";
+				} elseif (is_ipaddrv6($secondary)) {
+					$dhcpdconf .= "	secondary6 {$secondary};\n";
 				}
 				if ($zone['ddnsdomainkeyname'] <> "" && $zone['ddnsdomainkey'] <> "") {
 					$dhcpdconf .= "	key {$zone['ddnsdomainkeyname']};\n";
@@ -1407,12 +1513,6 @@ EOD;
 		// of each subnet here is always /64.
 		$pdlen = 64;
 
-		if ($is_olsr_enabled == true) {
-			if ($dhcpv6ifconf['netmask']) {
-				$subnetmask = gen_subnet_maskv6($dhcpv6ifconf['netmask']);
-			}
-		}
-
 		$dnscfgv6 = "";
 
 		if ($dhcpv6ifconf['domain']) {
@@ -1420,7 +1520,7 @@ EOD;
 		}
 
 		if ($dhcpv6ifconf['domainsearchlist'] <> "") {
-			$dnscfgv6 .= "	option domain-search \"" . join("\",\"", preg_split("/[ ;]+/", $dhcpv6ifconf['domainsearchlist'])) . "\";\n";
+			$dnscfgv6 .= "	option dhcp6.domain-search \"" . join("\",\"", preg_split("/[ ;]+/", $dhcpv6ifconf['domainsearchlist'])) . "\";\n";
 		}
 
 		if (isset($dhcpv6ifconf['ddnsupdate'])) {
@@ -1438,20 +1538,24 @@ EOD;
 			$dnscfgv6 .= "	do-forward-updates false;\n";
 		}
 
-		if (is_array($dhcpv6ifconf['dnsserver']) && ($dhcpv6ifconf['dnsserver'][0])) {
-			$dnscfgv6 .= "	option dhcp6.name-servers " . join(",", $dhcpv6ifconf['dnsserver']) . ";";
-		} else if (((isset($config['dnsmasq']['enable'])) || isset($config['unbound']['enable'])) && (is_ipaddrv6($ifcfgipv6))) {
-			$dnscfgv6 .= "	option dhcp6.name-servers {$ifcfgipv6};";
-		} else if (is_array($syscfg['dnsserver']) && ($syscfg['dnsserver'][0])) {
-			$dns_arrv6 = array();
-			foreach ($syscfg['dnsserver'] as $dnsserver) {
-				if (is_ipaddrv6($dnsserver)) {
-					$dns_arrv6[] = $dnsserver;
+		if ($dhcpv6ifconf['dhcp6c-dns'] != 'disabled') {
+			if (is_array($dhcpv6ifconf['dnsserver']) && ($dhcpv6ifconf['dnsserver'][0])) {
+				$dnscfgv6 .= "	option dhcp6.name-servers " . join(",", $dhcpv6ifconf['dnsserver']) . ";\n";
+			} else if (((isset($config['dnsmasq']['enable'])) || isset($config['unbound']['enable'])) && (is_ipaddrv6($ifcfgipv6))) {
+				$dnscfgv6 .= "	option dhcp6.name-servers {$ifcfgipv6};\n";
+			} else if (is_array($syscfg['dnsserver']) && ($syscfg['dnsserver'][0])) {
+				$dns_arrv6 = array();
+				foreach ($syscfg['dnsserver'] as $dnsserver) {
+					if (is_ipaddrv6($dnsserver)) {
+						$dns_arrv6[] = $dnsserver;
+					}
+				}
+				if (!empty($dns_arrv6)) {
+					$dnscfgv6 .= "	option dhcp6.name-servers " . join(",", $dns_arrv6) . ";\n";
 				}
 			}
-			if (!empty($dns_arrv6)) {
-				$dnscfgv6 .= "	option dhcp6.name-servers " . join(",", $dns_arrv6) . ";";
-			}
+		} else {
+			$dnscfgv6 .= "	#option dhcp6.name-servers --;\n";
 		}
 
 		if (!is_ipaddrv6($ifcfgipv6)) {
@@ -1465,7 +1569,7 @@ EOD;
 		    !empty($dhcpv6ifconf['ddnsdomain'])) {
 			$newzone = array();
 			$newzone['domain-name'] = $dhcpv6ifconf['ddnsdomain'];
-			$newzone['dns-servers'][] = $dhcpv6ifconf['ddnsdomainprimary'];
+			$newzone['dns-servers'] = array($dhcpv6ifconf['ddnsdomainprimary'], $dhcpv6ifconf['ddnsdomainsecondary']);
 			$newzone['ddnsdomainkeyname'] = $dhcpv6ifconf['ddnsdomainkeyname'];
 			$newzone['ddnsdomainkey'] = $dhcpv6ifconf['ddnsdomainkey'];
 			$ddns_zones[] = $newzone;
@@ -1474,7 +1578,7 @@ EOD;
 				foreach ($ptr_zones as $ptr_zone) {
 					$reversezone = array();
 					$reversezone['ptr-domain'] = $ptr_zone;
-					$reversezone['dns-servers'][] = $dhcpv6ifconf['ddnsdomainprimary'];
+					$reversezone['dns-servers'] = array($dhcpv6ifconf['ddnsdomainprimary'], $dhcpv6ifconf['ddnsdomainsecondary']);
 					$reversezone['ddnsdomainkeyname'] = $dhcpv6ifconf['ddnsdomainkeyname'];
 					$reversezone['ddnsdomainkey'] = $dhcpv6ifconf['ddnsdomainkey'];
 					$ddns_zones[] = $reversezone;
@@ -1491,11 +1595,11 @@ EOD;
 			$range_to = merge_ipv6_delegated_prefix($ifcfgipv6, $range_to, $pdlen);
 		}
 
-		$dhcpdv6conf .= <<<EOD
-	range6 {$range_from} {$range_to};
-$dnscfgv6
+		if (!empty($dhcpv6ifconf['range']['from']) && !empty($dhcpv6ifconf['range']['to'])) {
+			$dhcpdv6conf .= "	range6 {$range_from} {$range_to};\n";
+		}
 
-EOD;
+		$dhcpdv6conf .= $dnscfgv6;
 
 		if (is_ipaddrv6($dhcpv6ifconf['prefixrange']['from']) && is_ipaddrv6($dhcpv6ifconf['prefixrange']['to'])) {
 			$dhcpdv6conf .= "	prefix6 {$dhcpv6ifconf['prefixrange']['from']} {$dhcpv6ifconf['prefixrange']['to']} /{$dhcpv6ifconf['prefixrange']['prefixlength']};\n";
@@ -1544,7 +1648,7 @@ EOD;
 
 		// Handle option, number rowhelper values
 		$dhcpdv6conf .= "\n";
-		if ($dhcpv6ifconf['numberoptions']['item']) {
+		if (isset($dhcpv6ifconf['numberoptions']['item']) && is_array($dhcpv6ifconf['numberoptions']['item'])) {
 			foreach ($dhcpv6ifconf['numberoptions']['item'] as $itemv6idx => $itemv6) {
 				$itemv6_value = base64_decode($itemv6['value']);
 				$dhcpdv6conf .= "	option custom-{$dhcpv6if}-{$itemv6idx} \"{$itemv6_value}\";\n";
@@ -1635,6 +1739,7 @@ EOD;
 
 	if ($nsupdate) {
 		$dhcpdv6conf .= "ddns-update-style interim;\n";
+		$dhcpdv6conf .= "update-static-leases on;\n";
 	} else {
 		$dhcpdv6conf .= "ddns-update-style none;\n";
 	}
@@ -1751,7 +1856,8 @@ function services_dhcrelay_configure() {
 	/* kill any running dhcrelay */
 	killbypid("{$g['varrun_path']}/dhcrelay.pid");
 
-	$dhcrelaycfg =& $config['dhcrelay'];
+	init_config_arr(array('dhcrelay'));
+	$dhcrelaycfg = &$config['dhcrelay'];
 
 	/* DHCPRelay enabled on any interfaces? */
 	if (!isset($dhcrelaycfg['enable'])) {
@@ -1766,17 +1872,18 @@ function services_dhcrelay_configure() {
 
 	$iflist = get_configured_interface_list();
 
+	$dhcrelayifs = array();
 	$dhcifaces = explode(",", $dhcrelaycfg['interface']);
 	foreach ($dhcifaces as $dhcrelayif) {
-		if (!isset($iflist[$dhcrelayif]) ||
-		    link_interface_to_bridge($dhcrelayif)) {
+		if (!isset($iflist[$dhcrelayif])) {
 			continue;
 		}
 
-		if (is_ipaddr(get_interface_ip($dhcrelayif))) {
+		if (get_interface_ip($dhcrelayif)) {
 			$dhcrelayifs[] = get_real_interface($dhcrelayif);
 		}
 	}
+	$dhcrelayifs = array_unique($dhcrelayifs);
 
 	/*
 	 * In order for the relay to work, it needs to be active
@@ -1787,22 +1894,47 @@ function services_dhcrelay_configure() {
 		log_error(gettext("No destination IP has been configured!"));
 		return;
 	}
-
+	$srvifaces = array();
 	foreach ($srvips as $srcidx => $srvip) {
 		$destif = guess_interface_from_ip($srvip);
-		if (!empty($destif)) {
-			$dhcrelayifs[] = $destif;
+		if (!empty($destif) && !is_pseudo_interface($destif)) {
+			$srvifaces[] = $destif;
 		}
 	}
-	$dhcrelayifs = array_unique($dhcrelayifs);
+	$srvifaces = array_unique($srvifaces);
+
+	/* Check for relays in the same subnet as clients so they can bind for
+	 * either direction (up or down) */
+	$srvrelayifs = array_intersect($dhcrelayifs, $srvifaces);
+
+	/* The server interface(s) should not be in this list */
+	$dhcrelayifs = array_diff($dhcrelayifs, $srvifaces);
+
+	/* Remove the dual-role interfaces from up and down lists */
+	$srvifaces = array_diff($srvifaces, $srvrelayifs);
+	$dhcrelayifs = array_diff($dhcrelayifs, $srvrelayifs);
 
 	/* fire up dhcrelay */
-	if (empty($dhcrelayifs)) {
-		log_error(gettext("No suitable interface found for running dhcrelay!"));
+	if (empty($dhcrelayifs) && empty($srvrelayifs)) {
+		log_error(gettext("No suitable downstream interfaces found for running dhcrelay!"));
+		return; /* XXX */
+	}
+	if (empty($srvifaces) && empty($srvrelayifs)) {
+		log_error(gettext("No suitable upstream interfaces found for running dhcrelay!"));
 		return; /* XXX */
 	}
 
-	$cmd = "/usr/local/sbin/dhcrelay -i " . implode(" -i ", $dhcrelayifs);
+	$cmd = "/usr/local/sbin/dhcrelay";
+
+	if (!empty($dhcrelayifs)) {
+		$cmd .= " -id " . implode(" -id ", $dhcrelayifs);
+	}
+	if (!empty($srvifaces)) {
+		$cmd .= " -iu " . implode(" -iu ", $srvifaces);
+	}
+	if (!empty($srvrelayifs)) {
+		$cmd .= " -i " . implode(" -i ", $srvrelayifs);
+	}
 
 	if (isset($dhcrelaycfg['agentoption'])) {
 		$cmd .= " -a -m replace";
@@ -1826,7 +1958,8 @@ function services_dhcrelay6_configure() {
 	/* kill any running dhcrelay */
 	killbypid("{$g['varrun_path']}/dhcrelay6.pid");
 
-	$dhcrelaycfg =& $config['dhcrelay6'];
+	init_config_arr(array('dhcrelay6'));
+	$dhcrelaycfg = &$config['dhcrelay6'];
 
 	/* DHCPv6 Relay enabled on any interfaces? */
 	if (!isset($dhcrelaycfg['enable'])) {
@@ -1843,12 +1976,11 @@ function services_dhcrelay6_configure() {
 
 	$dhcifaces = explode(",", $dhcrelaycfg['interface']);
 	foreach ($dhcifaces as $dhcrelayif) {
-		if (!isset($iflist[$dhcrelayif]) ||
-		    link_interface_to_bridge($dhcrelayif)) {
+		if (!isset($iflist[$dhcrelayif])) {
 			continue;
 		}
 
-		if (is_ipaddrv6(get_interface_ipv6($dhcrelayif))) {
+		if (get_interface_ipv6($dhcrelayif)) {
 			$dhcrelayifs[] = get_real_interface($dhcrelayif);
 		}
 	}
@@ -1862,7 +1994,7 @@ function services_dhcrelay6_configure() {
 	$srvifaces = array();
 	foreach ($srvips as $srcidx => $srvip) {
 		$destif = guess_interface_from_ip($srvip);
-		if (!empty($destif)) {
+		if (!empty($destif) && !is_pseudo_interface($destif)) {
 			$srvifaces[] = "{$srvip}%{$destif}";
 		}
 	}
@@ -1926,7 +2058,11 @@ function services_dyndns_configure($int = "") {
 		echo "services_dyndns_configure() being called $mt\n";
 	}
 
-	$dyndnscfg = $config['dyndnses']['dyndns'];
+	if (isset($config['dyndnses']['dyndns']) && is_array($config['dyndnses']['dyndns'])) {
+		$dyndnscfg = $config['dyndnses']['dyndns'];
+	} else {
+		return 0;
+	}
 	$gwgroups = return_gateway_groups_array(true);
 	if (is_array($dyndnscfg)) {
 		if (platform_booting()) {
@@ -1961,6 +2097,7 @@ function services_dyndns_configure($int = "") {
 				$dyndns['verboselog'] = isset($dyndns['verboselog']);
 				$dyndns['curl_ipresolve_v4'] = isset($dyndns['curl_ipresolve_v4']);
 				$dyndns['curl_ssl_verifypeer'] = isset($dyndns['curl_ssl_verifypeer']);
+				$dyndns['proxied'] = isset($dyndns['proxied']);
 				services_dyndns_configure_client($dyndns);
 				sleep(1);
 			}
@@ -2227,6 +2364,76 @@ function services_unbound_configure($restart_dhcp = true) {
 			}
 		}
 
+		$python_mode = false;
+		if (isset($config['unbound']['python']) && !empty($config['unbound']['python_script'])) {
+			$python_mode = true;
+		}
+
+		/* Include any additional functions as defined by python script include file */
+		if (file_exists("{$g['unbound_chroot_path']}/{$config['unbound']['python_script']}_include.inc")) {
+			exec("/usr/local/bin/php -l " . escapeshellarg("{$g['unbound_chroot_path']}/{$config['unbound']['python_script']}_include.inc")
+				. " 2>&1", $py_output, $py_retval);
+			if ($py_retval == 0) {
+				require_once("{$g['unbound_chroot_path']}/{$config['unbound']['python_script']}_include.inc");
+			}
+		}
+
+		/* DNS Resolver python integration */
+		if ($python_mode) {
+			if (!is_dir("{$g['unbound_chroot_path']}/dev")) {
+				safe_mkdir("{$g['unbound_chroot_path']}/dev");
+			}
+			exec("/sbin/mount -t devfs devfs " . escapeshellarg("{$g['unbound_chroot_path']}/dev"));
+		} else {
+			if (is_dir("{$g['unbound_chroot_path']}/dev")) {
+				exec("/sbin/umount -f " . escapeshellarg("{$g['unbound_chroot_path']}/dev"));
+			}
+		}
+		$base_folder = '/usr/local';
+		foreach (array('/bin', '/lib') as $dir) {
+			$validate = exec("/sbin/mount | /usr/bin/grep " . escapeshellarg("{$g['unbound_chroot_path']}{$base_folder}{$dir} (nullfs") . " 2>&1");
+			if ($python_mode) {
+
+				// Add DNS Resolver python integration
+				if (empty($validate)) {
+					if (!is_dir("{$g['unbound_chroot_path']}{$base_folder}{$dir}")) {
+						safe_mkdir("{$g['unbound_chroot_path']}{$base_folder}{$dir}");
+					}
+					$output = $retval = '';
+					exec("/sbin/mount_nullfs -o ro " . escapeshellarg("/usr/local{$dir}") . ' '
+					    . escapeshellarg("{$g['unbound_chroot_path']}{$base_folder}{$dir}") . " 2>&1", $output, $retval);
+
+					// Disable Unbound python on mount failure
+					if ($retval != 0) {
+						$config['unbound']['python'] = '';
+						$log_msg = "[Unbound-pymod]: Disabling Unbound python due to failed mount";
+						write_config($log_msg);
+						log_error($log_msg);
+					}
+				}
+			}
+
+			// Remove DNS Resolver python integration
+			elseif (!empty($validate)) {
+				exec("/sbin/umount -t nullfs " . escapeshellarg("{$g['unbound_chroot_path']}{$base_folder}{$dir}") . " 2>&1", $output, $retval);
+				if ($retval == 0) {
+					foreach (array( "/usr/local{$dir}", '/usr/local', '/usr') as $folder) {
+						if (!empty($g['unbound_chroot_path']) && $g['unbound_chroot_path'] != '/' && is_dir("{$g['unbound_chroot_path']}{$folder}")) {
+							@rmdir(escapeshellarg("{$g['unbound_chroot_path']}{$folder}"));
+						}
+
+						// Delete remaining subfolders on next loop
+						if ($dir == '/bin') {
+							break;
+						}
+					}
+				}
+				else {
+					log_error("[Unbound-pymod]: Failed to unmount!");
+				}
+			}
+		}
+
 		if (platform_booting()) {
 			echo gettext("Starting DNS Resolver...");
 		} else {
@@ -2340,8 +2547,8 @@ trap := "{$config['snmpd']['trapstring']}"
 EOD;
 		}
 
-		$sysDescr = "{$g['product_name']} " . php_uname("n") .
-			" {$g['product_version']} {$g['platform']} " . php_uname("s") .
+		$sysDescr = "{$g['product_name']} {$config['system']['hostname']}.{$config['system']['domain']}" .
+			" {$g['product_version_string']} {$g['platform']} " . php_uname("s") .
 			" " . php_uname("r") . " " . php_uname("m");
 
 		$snmpdconf .= <<<EOD
@@ -2549,7 +2756,11 @@ function services_dnsupdate_process($int = "", $updatehost = "", $forced = false
 			$wanip = get_interface_ip($if);
 			$bindipv4 = $wanip;
 		}
-		$wanipv6 = get_interface_ipv6($if);
+		if (is_stf_interface($dnsupdate['interface'])) { 
+			$wanipv6 = get_interface_ipv6($dnsupdate['interface'] . '_stf');
+		} else {
+			$wanipv6 = get_interface_ipv6($if);
+		}
 		$bindipv6 = $wanipv6;
 
 		/* Handle non-default interface bindings */
@@ -2560,7 +2771,11 @@ function services_dnsupdate_process($int = "", $updatehost = "", $forced = false
 		} elseif (!empty($dnsupdate['updatesource'])) {
 			/* Find the alternate binding address */
 			$bindipv4 = get_interface_ip($dnsupdate['updatesource']);
-			$bindipv6 = get_interface_ipv6($dnsupdate['updatesource']);
+			if (is_stf_interface($dnsupdate['interface'])) { 
+				$bindipv6 = get_interface_ipv6($dnsupdate['updatesource'] . '_stf');
+			} else {
+				$bindipv6 = get_interface_ipv6($dnsupdate['updatesource']);
+			}
 		}
 
 		/* Handle IPv4/IPv6 selection for the update source interface/VIP */
@@ -2756,7 +2971,7 @@ function configure_cron() {
 	$crontab_contents = file("/etc/crontab", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
 
 	for ($i = 0; $i < count($crontab_contents); $i++) {
-		$cron_item =& $crontab_contents[$i];
+		$cron_item = &$crontab_contents[$i];
 		if (strpos($cron_item, "# pfSense specific crontab entries") !== false) {
 			array_splice($crontab_contents, $i - 1);
 			break;

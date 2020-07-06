@@ -3,7 +3,9 @@
  * xmlrpc.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2005 Colin Smith
  * All rights reserved.
  *
@@ -33,6 +35,7 @@ require_once("auth.inc");
 require_once("filter.inc");
 require_once("ipsec.inc");
 require_once("vpn.inc");
+require_once("captiveportal.inc");
 require_once("shaper.inc");
 require_once("XML/RPC2/Server.php");
 
@@ -42,7 +45,9 @@ class pfsense_xmlrpc_server {
 	private $remote_addr;
 
 	private function auth() {
-		global $config;
+		global $config, $userindex;
+		$userindex = index_users();
+
 		$username = $_SERVER['PHP_AUTH_USER'];
 		$password = $_SERVER['PHP_AUTH_PW'];
 
@@ -60,8 +65,9 @@ class pfsense_xmlrpc_server {
 		}
 
 		if (!$login_ok) {
-			log_auth("webConfigurator authentication error for '" .
-			    $username . "' from " . $this->remote_addr);
+			log_auth(sprintf(gettext("webConfigurator authentication error for user '%1\$s' from: %2\$s"),
+			    $username,
+			    $this->remote_addr));
 
 			require_once("XML/RPC2/Exception.php");
 			throw new XML_RPC2_FaultException(gettext(
@@ -183,7 +189,7 @@ class pfsense_xmlrpc_server {
 	public function restore_config_section($sections) {
 		$this->auth();
 
-		global $config;
+		global $config, $cpzone, $cpzoneid;
 
 		$old_config = $config;
 		$old_ipsec_enabled = ipsec_enabled();
@@ -204,13 +210,14 @@ class pfsense_xmlrpc_server {
 			'crl',
 			'dhcpd',
 			'dhcpv6',
+			'dnshaper',
 			'dnsmasq',
 			'filter',
 			'ipsec',
-			'load_balancer',
 			'nat',
 			'openvpn',
 			'schedules',
+			'shaper',
 			'unbound',
 			'wol',
 		);
@@ -225,6 +232,21 @@ class pfsense_xmlrpc_server {
 			$config[$section] = $sections[$section];
 			unset($sections[$section]);
 			$syncd_full_sections[] = $section;
+		}
+
+		/* If captive portal sync is enabled on primary node, remove local CP on the secondary */
+		if (is_array($config['captiveportal']) && is_array($sections['captiveportal'])) {
+			foreach ($config['captiveportal'] as $zone => $item) {
+				if (!isset($sections['captiveportal'][$zone])) {
+					$cpzone = $zone;
+					unset($config['captiveportal'][$cpzone]['enable']);
+					captiveportal_configure_zone($config['captiveportal'][$cpzone]);
+					unset($config['captiveportal'][$cpzone]);
+					if (isset($config['voucher'][$cpzone])) {
+						unset($config['voucher'][$cpzone]);
+					}
+				}
+			}
 		}
 
 		/* Only touch users if users are set to synchronize from the primary node
@@ -283,7 +305,7 @@ class pfsense_xmlrpc_server {
 
 					if ($idx === false) {
 						$u2add[] = $user;
-					} else if ($user['uid'] < 2000) {
+					} else if (($user['uid'] < 2000) && ($sections['hasync']['adminsync'] != 'on')) {
 						$u2keep[] = $idx;
 					} else if ($user != $local_users[$idx]) {
 						$u2add[] = $user;
@@ -313,17 +335,13 @@ class pfsense_xmlrpc_server {
 
 			foreach($sections['voucher'] as $zone => $item) {
 				unset($sections['voucher'][$zone]['roll']);
+				// Note : This code can be safely deleted once #97 fix has been applied and deployed to pfSense stable release.
+				// Please do not delete this code before
 				if (isset($config['voucher'][$zone]['vouchersyncdbip'])) {
 					$sections['voucher'][$zone]['vouchersyncdbip'] =
 					    $config['voucher'][$zone]['vouchersyncdbip'];
 				} else {
 					unset($sections['voucher'][$zone]['vouchersyncdbip']);
-				}
-				if (isset($config['voucher'][$zone]['vouchersyncport'])) {
-					$sections['voucher'][$zone]['vouchersyncport'] =
-					    $config['voucher'][$zone]['vouchersyncport'];
-				} else {
-					unset($sections['voucher'][$zone]['vouchersyncport']);
 				}
 				if (isset($config['voucher'][$zone]['vouchersyncusername'])) {
 					$sections['voucher'][$zone]['vouchersyncusername'] =
@@ -337,7 +355,36 @@ class pfsense_xmlrpc_server {
 				} else {
 					unset($sections['voucher'][$zone]['vouchersyncpass']);
 				}
+				// End note.
 			}
+		}
+
+		if (is_array($sections['captiveportal'])) {
+			// Captiveportal : Backward HA settings should remain local.
+			foreach ($sections['captiveportal'] as $zone => $cp) {
+				if (isset($config['captiveportal'][$zone]['enablebackwardsync'])) {
+					$sections['captiveportal'][$zone]['enablebackwardsync'] = $config['captiveportal'][$zone]['enablebackwardsync'];
+				} else {
+					unset($sections['captiveportal'][$zone]['enablebackwardsync']);
+				}
+				if (isset($config['captiveportal'][$zone]['backwardsyncip'])) {
+					$sections['captiveportal'][$zone]['backwardsyncip'] = $config['captiveportal'][$zone]['backwardsyncip'];
+				} else {
+					unset($sections['captiveportal'][$zone]['backwardsyncip']);
+				}
+				if (isset($config['captiveportal'][$zone]['backwardsyncuser'])) {
+					$sections['captiveportal'][$zone]['backwardsyncuser'] = $config['captiveportal'][$zone]['backwardsyncuser'];
+				} else {
+					unset($sections['captiveportal'][$zone]['backwardsyncuser']);
+				}
+				if (isset($config['captiveportal'][$zone]['backwardsyncpassword'])) {
+					$sections['captiveportal'][$zone]['backwardsyncpassword'] = $config['captiveportal'][$zone]['backwardsyncpassword'];
+				} else {
+					unset($sections['captiveportal'][$zone]['vouchersyncpass']);
+				}
+			}
+			$config['captiveportal'] = $sections['captiveportal'];
+			unset($sections['captiveportal']);
 		}
 
 		$vipbackup = array();
@@ -382,17 +429,12 @@ class pfsense_xmlrpc_server {
 		/* For vip section, first keep items sent from the master */
 		$config = array_merge_recursive_unique($config, $sections);
 
+
 		/* Remove locally items removed remote */
 		foreach ($voucher as $zone => $item) {
-			/* Zone was deleted on master, delete its vouchers */
-			if (!isset($config['captiveportal'][$zone])) {
-				unset($config['voucher'][$zone]);
-				continue;
-			}
 			/* No rolls on master, delete local ones */
 			if (!is_array($item['roll'])) {
 				unset($config['voucher'][$zone]['roll']);
-				continue;
 			}
 		}
 
@@ -425,6 +467,7 @@ class pfsense_xmlrpc_server {
 					continue;
 				}
 				$l_roll_idx = $l_rolls[$zone][$roll['number']];
+				init_config_arr(array('voucher', $zone));
 				$l_vouchers = &$config['voucher'][$zone];
 				$l_roll = $l_vouchers['roll'][$l_roll_idx];
 				if (!isset($l_roll['lastsync'])) {
@@ -475,7 +518,7 @@ class pfsense_xmlrpc_server {
 
 		/*
 		 * The real work on handling the vips specially
-		 * This is a copy of intefaces_vips_configure with addition of
+		 * This is a copy of interfaces_vips_configure with addition of
 		 * not reloading existing/not changed carps
 		 */
 		if (isset($sections['virtualip']) &&
@@ -567,13 +610,13 @@ class pfsense_xmlrpc_server {
 		}
 
 		if ($old_ipsec_enabled !== ipsec_enabled()) {
-			vpn_ipsec_configure();
+			ipsec_configure();
 		}
 
 		unset($old_config);
 
 		local_sync_accounts($u2add, $u2del, $g2add, $g2del);
-		filter_configure(false);
+		$this->filter_configure(false);
 
 		return true;
 	}
@@ -637,15 +680,12 @@ class pfsense_xmlrpc_server {
 	 *
 	 * @return bool
 	 */
-	public function filter_configure($reset_accounts = true) {
-		$this->auth();
-
+	private function filter_configure($reset_accounts = true) {
 		global $g, $config;
 
 		filter_configure();
 		system_routing_configure();
 		setup_gateways_monitor();
-		relayd_configure();
 		require_once("openvpn.inc");
 		openvpn_resync_all();
 
@@ -687,7 +727,95 @@ class pfsense_xmlrpc_server {
 			local_reset_accounts();
 		}
 
+		captiveportal_configure();
+		voucher_configure();
+
 		return true;
+	}
+
+	/**
+	 * Wrapper for captiveportal connected users and
+	 * active/expired vouchers synchronization
+	 *
+	 * @param array $arguments
+	 *
+	 * @return array
+	 */
+	public function captive_portal_sync($arguments) {
+		$this->auth();
+		// Note : no protection against CARP loop is done here, and this is in purpose.
+		// This function is used for bi-directionnal sync, which is precisely what CARP loop protection is supposed to prevent.
+		// CARP loop has to be managed within functions using captive_portal_sync()
+		global $g, $config, $cpzone;
+
+		if (empty($arguments['op']) || empty($arguments['zone']) || empty($config['captiveportal'][$arguments['zone']])) {
+			return false;
+		}
+		$cpzone = $arguments['zone'];
+
+		if ($arguments['op'] === 'get_databases') {
+			$active_vouchers = array();
+			$expired_vouchers = array();
+
+			if (is_array($config['voucher'][$cpzone]['roll'])) {
+				foreach($config['voucher'][$cpzone]['roll'] as $id => $roll) {
+					$expired_vouchers[$roll['number']] = base64_encode(voucher_read_used_db($roll['number']));
+					$active_vouchers[$roll['number']] = voucher_read_active_db($roll['number']);
+				}
+			}
+			// base64 is here for safety reasons, as we don't fully control
+			// the content of these arrays.
+			$returndata = array('connected_users' => base64_encode(serialize(captiveportal_read_db())),
+			'active_vouchers' => base64_encode(serialize($active_vouchers)),
+			'expired_vouchers' => base64_encode(serialize($expired_vouchers)));
+
+			return $returndata;
+		} elseif ($arguments['op'] === 'connect_user') {
+			$user = unserialize(base64_decode($arguments['user']));
+			$user['attributes']['allow_time'] = $user['allow_time'];
+
+			// pipeno might be different between primary and secondary
+			$pipeno = captiveportal_get_next_dn_ruleno('auth');
+			return portal_allow($user['clientip'], $user['clientmac'], $user['username'], $user['password'], null,
+			    $user['attributes'], $pipeno, $user['authmethod'], $user['context'], $user['sessionid']);
+		} elseif ($arguments['op'] === 'disconnect_user') {
+			$session = unserialize(base64_decode($arguments['session']));
+			/* read database again, as pipeno might be different between primary & secondary */
+			$sessionid = SQLite3::escapeString($session['sessionid']);
+			$local_dbentry = captiveportal_read_db("WHERE sessionid = '{$sessionid}'");
+
+			if (!empty($local_dbentry) && count($local_dbentry) == 1) {
+				return captiveportal_disconnect($local_dbentry[0], $session['term_cause'], $session['stop_time'], true);
+			} else {
+				return false;
+			}
+		} elseif ($arguments['op'] === 'remove_entries') {
+			$entries = unserialize(base64_decode($arguments['entries']));
+
+			return captiveportal_remove_entries($entries, true);
+		} elseif ($arguments['op'] === 'disconnect_all') {
+			$arguments = unserialize(base64_decode($arguments['arguments']));
+
+			return captiveportal_disconnect_all($arguments['term_cause'], $arguments['logout_reason'], true);
+		} elseif ($arguments['op'] === 'write_vouchers') {
+			$arguments = unserialize(base64_decode($arguments['arguments']));
+
+			if (is_array($arguments['active_and_used_vouchers_bitmasks'])) {
+				foreach ($arguments['active_and_used_vouchers_bitmasks'] as $roll => $used) {
+					if (is_array($used)) {
+						foreach ($used as $u) {
+							voucher_write_used_db($roll, base64_encode($u));
+						}
+					} else {
+						voucher_write_used_db($roll, base64_encode($used));
+					}
+				}
+			}
+			foreach ($arguments['active_vouchers'] as $roll => $active_vouchers) {
+				voucher_write_active_db($roll, $active_vouchers);
+			}
+			return true;
+		}
 	}
 
 	/**
@@ -722,7 +850,7 @@ class pfsense_xmlrpc_server {
 	}
 }
 
-// run script untill its done and can 'unlock' the xmlrpc.lock, this prevents hanging php-fpm / webgui
+// run script until its done and can 'unlock' the xmlrpc.lock, this prevents hanging php-fpm / webgui
 ignore_user_abort(true);
 set_time_limit(0);
 

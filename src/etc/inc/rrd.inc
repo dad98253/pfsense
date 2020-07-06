@@ -4,7 +4,9 @@
  *
  * part of pfSense (https://www.pfsense.org)
  * Copyright (c) 2010 Seth Mos <seth.mos@dds.nl>
- * Copyright (c) 2010-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2010-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -392,7 +394,7 @@ function enable_rrd_graphing() {
 				$rrdupdatesh .= " sleep 0.2\n";
 				$rrdupdatesh .= " echo \"quit\"\n";
 				$rrdupdatesh .= "}\n";
-				$rrdupdatesh .= "OVPN=`list_current_users | nc -U {$g['varetc_path']}/openvpn/server{$vpnid}.sock | awk -F\",\" '/^CLIENT_LIST/ {print \$2}' | wc -l | awk '{print $1}'`\n";
+				$rrdupdatesh .= "OVPN=`list_current_users | /usr/bin/nc -U {$g['openvpn_base']}/server{$vpnid}/sock | /usr/bin/awk -F\",\" '/^CLIENT_LIST/ {print \$2}' | /usr/bin/wc -l | /usr/bin/awk '{print $1}'`\n";
 				$rrdupdatesh .= "$rrdtool update $rrddbpath$ifname$vpnusers N:\${OVPN}\n";
 			}
 
@@ -415,7 +417,7 @@ function enable_rrd_graphing() {
 						$factor = 1;
 						break;
 				}
-				$qbandwidth = $altq->GetBandwidth() * $factor;
+				$qbandwidth = (int) $altq->GetBandwidth() * $factor;
 				if ($qbandwidth <= 0) {
 					$qbandwidth = 100 * 1000 * 1000; /* 100Mbit */
 				}
@@ -795,7 +797,7 @@ function enable_rrd_graphing() {
 		/* End Captive Portal statistics */
 
 		/* NTP, set up the ntpd rrd file */
-		if (isset($config['ntpd']['statsgraph'])) {
+		if (isset($config['ntpd']['statsgraph']) && ($config['ntpd']['enable'] != 'disabled')) {
 			/* set up the ntpd rrd file */
 			if (!file_exists("$rrddbpath$ntpd")) {
 				$rrdcreate = "$rrdtool create $rrddbpath$ntpd --step $rrdntpdinterval ";
@@ -803,7 +805,7 @@ function enable_rrd_graphing() {
 				$rrdcreate .= "DS:sjit:GAUGE:$ntpdvalid:0:1000 ";
 				$rrdcreate .= "DS:cjit:GAUGE:$ntpdvalid:0:1000 ";
 				$rrdcreate .= "DS:wander:GAUGE:$ntpdvalid:0:1000 ";
-				$rrdcreate .= "DS:freq:GAUGE:$ntpdvalid:0:1000 ";
+				$rrdcreate .= "DS:freq:GAUGE:$ntpdvalid:-1000:1000 ";
 				$rrdcreate .= "DS:disp:GAUGE:$ntpdvalid:0:1000 ";
 				$rrdcreate .= "RRA:MIN:0.5:1:1200 ";
 				$rrdcreate .= "RRA:MIN:0.5:5:720 ";

@@ -3,7 +3,9 @@
  * system_update_settings.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2005 Colin Smith
  * All rights reserved.
  *
@@ -34,12 +36,14 @@ $repos = pkg_list_repos();
 
 if ($_POST) {
 
+	init_config_arr(array('system', 'firmware'));
 	if ($_POST['disablecheck'] == "yes") {
 		$config['system']['firmware']['disablecheck'] = true;
 	} elseif (isset($config['system']['firmware']['disablecheck'])) {
 		unset($config['system']['firmware']['disablecheck']);
 	}
 
+	init_config_arr(array('system', 'gitsync'));
 	if ($_POST['synconupgrade'] == "yes") {
 		$config['system']['gitsync']['synconupgrade'] = true;
 	} elseif (isset($config['system']['gitsync']['synconupgrade'])) {
@@ -87,6 +91,12 @@ if ($_POST) {
 		unset($config['system']['gitsync']['dryrun']);
 	}
 
+	if (empty($config['system']['firmware'])) {
+		unset($config['system']['firmware']);
+	}
+	if (empty($config['system']['gitsync'])) {
+		unset($config['system']['gitsync']);
+	}
 	write_config(gettext("Saved system update settings."));
 
 	$savemsg = gettext("Changes have been saved successfully");
@@ -114,7 +124,7 @@ $tab_array[] = array(gettext("Update Settings"), true, "system_update_settings.p
 display_top_tabs($tab_array);
 
 // Check to see if any new repositories have become available. This data is cached and
-// refreshed evrey 24 hours
+// refreshed every 24 hours
 update_repos();
 $repopath = "/usr/local/share/{$g['product_name']}/pkg/repos";
 $helpfilename = "{$repopath}/{$g['product_name']}-repo-custom.help";

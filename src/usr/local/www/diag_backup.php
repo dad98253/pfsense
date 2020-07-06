@@ -3,7 +3,9 @@
  * diag_backup.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -41,6 +43,7 @@ require_once("guiconfig.inc");
 require_once("functions.inc");
 require_once("filter.inc");
 require_once("shaper.inc");
+require_once("pkg-utils.inc");
 
 $rrddbpath = "/var/db/rrd";
 $rrdtool = "/usr/bin/nice -n20 /usr/local/bin/rrdtool";
@@ -151,14 +154,11 @@ if ($_POST) {
 	if ($_POST["nopackages"] <> "") {
 		$options = "nopackages";
 	}
-	if ($_POST["ver"] <> "") {
-		$ver2restore = $_POST["ver"];
-	}
 	if ($mode) {
 		if ($mode == "download") {
 			if ($_POST['encrypt']) {
-				if (!$_POST['encrypt_password']) {
-					$input_errors[] = gettext("A password for encryption must be supplied and confirmed.");
+				if (!$_POST['encrypt_password'] || ($_POST['encrypt_password'] != $_POST['encrypt_password_confirm'])) {
+					$input_errors[] = gettext("Supplied password and confirmation do not match.");
 				}
 			}
 
@@ -179,10 +179,7 @@ if ($_POST) {
 						$data = backup_config_section($_POST['backuparea']);
 						$name = "{$_POST['backuparea']}-{$name}";
 					}
-					$sfn = "{$g['tmp_path']}/config.xml.nopkg";
-					file_put_contents($sfn, $data);
-					exec("sed '/<installedpackages>/,/<\/installedpackages>/d' {$sfn} > {$sfn}-new");
-					$data = file_get_contents($sfn . "-new");
+					$data = preg_replace('/\t*<installedpackages>.*<\/installedpackages>\n/sm', '', $data);
 				} else {
 					if (!$_POST['backuparea']) {
 						/* backup entire configuration */
@@ -202,6 +199,13 @@ if ($_POST) {
 				/*
 				 *	Backup RRD Data
 				 */
+
+				/* If the config on disk had rrddata tags already, remove that section first.
+				 * See https://redmine.pfsense.org/issues/8994 and
+				 *     https://redmine.pfsense.org/issues/10508 */
+				$data = preg_replace("/[[:blank:]]*<rrddata>.*<\\/rrddata>[[:blank:]]*\n*/s", "", $data);
+				$data = preg_replace("/[[:blank:]]*<rrddata\\/>[[:blank:]]*\n*/", "", $data);
+
 				if ($_POST['backuparea'] !== "rrddata" && !$_POST['donotbackuprrd']) {
 					$rrd_data_xml = rrd_data_xml();
 					$closing_tag = "</" . $g['xml_rootobj'] . ">";
@@ -213,20 +217,7 @@ if ($_POST) {
 					tagfile_reformat($data, $data, "config.xml");
 				}
 
-				$size = strlen($data);
-				header("Content-Type: application/octet-stream");
-				header("Content-Disposition: attachment; filename={$name}");
-				header("Content-Length: $size");
-				if (isset($_SERVER['HTTPS'])) {
-					header('Pragma: ');
-					header('Cache-Control: ');
-				} else {
-					header("Pragma: private");
-					header("Cache-Control: private, must-revalidate");
-				}
-				echo $data;
-
-				exit;
+				send_user_download('data', $data, $name);
 			}
 		}
 
@@ -243,25 +234,31 @@ if ($_POST) {
 					/* read the file contents */
 					$data = file_get_contents($_FILES['conffile']['tmp_name']);
 					if (!$data) {
-						log_error(sprintf(gettext("Warning, could not read file %s"), $_FILES['conffile']['tmp_name']));
-						return 1;
-					}
-
-					if ($_POST['decrypt']) {
+						$input_errors[] = gettext("Warning, could not read file {$_FILES['conffile']['tmp_name']}");
+					} elseif ($_POST['decrypt']) {
 						if (!tagfile_deformat($data, $data, "config.xml")) {
 							$input_errors[] = gettext("The uploaded file does not appear to contain an encrypted pfsense configuration.");
-							return 1;
+						} else {
+							$data = decrypt_data($data, $_POST['decrypt_password']);
+							if (empty($data)) {
+								$input_errors[] = gettext("File decryption failed. Incorrect password or file is invalid.");
+							}
 						}
-						$data = decrypt_data($data, $_POST['decrypt_password']);
 					}
-
 					if (stristr($data, "<m0n0wall>")) {
 						log_error(gettext("Upgrading m0n0wall configuration to pfsense."));
 						/* m0n0wall was found in config.  convert it. */
 						$data = str_replace("m0n0wall", "pfsense", $data);
 						$m0n0wall_upgrade = true;
 					}
-					if ($_POST['restorearea']) {
+
+					/* If the config on disk had empty rrddata tags, remove them to
+					 * avoid an XML parsing error.
+					 * See https://redmine.pfsense.org/issues/8994 */
+					$data = preg_replace("/<rrddata><\\/rrddata>/", "", $data);
+					$data = preg_replace("/<rrddata\\/>/", "", $data);
+
+					if ($_POST['restorearea'] && !$input_errors) {
 						/* restore a specific area of the configuration */
 						if (!stristr($data, "<" . $_POST['restorearea'] . ">")) {
 							$input_errors[] = gettext("An area to restore was selected but the correct xml tag could not be located.");
@@ -280,24 +277,48 @@ if ($_POST) {
 								$savemsg = gettext("The configuration area has been restored. The firewall may need to be rebooted.");
 							}
 						}
-					} else {
+					} elseif (!$input_errors) {
 						if (!stristr($data, "<" . $g['xml_rootobj'] . ">")) {
 							$input_errors[] = sprintf(gettext("A full configuration restore was selected but a %s tag could not be located."), $g['xml_rootobj']);
 						} else {
 							/* restore the entire configuration */
 							file_put_contents($_FILES['conffile']['tmp_name'], $data);
 							if (config_install($_FILES['conffile']['tmp_name']) == 0) {
+								/* Save current pkg repo to re-add on new config */
+								unset($pkg_repo_conf_path);
+								if (isset($config['system']['pkg_repo_conf_path'])) {
+									$pkg_repo_conf_path = $config['system']['pkg_repo_conf_path'];
+								}
+
 								/* this will be picked up by /index.php */
 								mark_subsystem_dirty("restore");
-								touch("/conf/needs_package_sync_after_reboot");
+								touch("/conf/needs_package_sync");
 								/* remove cache, we will force a config reboot */
 								if (file_exists("{$g['tmp_path']}/config.cache")) {
 									unlink("{$g['tmp_path']}/config.cache");
 								}
 								$config = parse_config(true);
+
+								/* Restore previously pkg repo configured */
+								$pkg_repo_restored = false;
+								if (isset($pkg_repo_conf_path)) {
+									$config['system']['pkg_repo_conf_path'] =
+									    $pkg_repo_conf_path;
+									$pkg_repo_restored = true;
+								} elseif (isset($config['system']['pkg_repo_conf_path'])) {
+									unset($config['system']['pkg_repo_conf_path']);
+									$pkg_repo_restored = true;
+								}
+
+								if ($pkg_repo_restored) {
+									write_config(gettext("Removing pkg repository set after restoring full configuration"));
+									pkg_update(true);
+								}
+
 								if (file_exists("/boot/loader.conf")) {
 									$loaderconf = file_get_contents("/boot/loader.conf");
-									if (strpos($loaderconf, "console=\"comconsole")) {
+									if (strpos($loaderconf, "console=\"comconsole") ||
+									    strpos($loaderconf, "boot_serial=\"YES")) {
 										$config['system']['enableserial'] = true;
 										write_config(gettext("Restore serial console enabling in configuration."));
 									}
@@ -305,7 +326,8 @@ if ($_POST) {
 								}
 								if (file_exists("/boot/loader.conf.local")) {
 									$loaderconf = file_get_contents("/boot/loader.conf.local");
-									if (strpos($loaderconf, "console=\"comconsole")) {
+									if (strpos($loaderconf, "console=\"comconsole") ||
+									    strpos($loaderconf, "boot_serial=\"YES")) {
 										$config['system']['enableserial'] = true;
 										write_config(gettext("Restore serial console enabling in configuration."));
 									}
@@ -381,7 +403,7 @@ if ($_POST) {
 										}
 									}
 								}
-								setup_serial_port();
+								console_configure();
 								if (is_interface_mismatch() == true) {
 									touch("/var/run/interface_mismatch_reboot_needed");
 									clear_subsystem_dirty("restore");
@@ -527,7 +549,7 @@ $section->addInput(new Form_Checkbox(
 	false
 ));
 
-$section->addInput(new Form_Input(
+$section->addPassword(new Form_Input(
 	'encrypt_password',
 	'Password',
 	'password',
@@ -645,9 +667,7 @@ events.push(function() {
 		decryptHide = !($('input[name="decrypt"]').is(':checked'));
 
 		hideInput('encrypt_password', encryptHide);
-		hideInput('encrypt_password_confirm', encryptHide);
 		hideInput('decrypt_password', decryptHide);
-		hideInput('decrypt_password_confirm', decryptHide);
 	}
 
 	// ---------- Click handlers ------------------------------------------------------------------

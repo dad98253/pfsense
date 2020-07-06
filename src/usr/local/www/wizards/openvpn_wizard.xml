@@ -5,7 +5,9 @@
  * openvpn_wizard.xml
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -121,7 +123,7 @@
 			<displayname>Hostname or IP address</displayname>
 			<type>input</type>
 			<bindstofield>ovpnserver->step2->ip</bindstofield>
-			<description>Address of the LDAP server. When using SSL or STARTTLS, this hostname must match the LDAP server certificate.</description>
+			<description>Address of the LDAP server. When using SSL/TLS or STARTTLS, this hostname must match the LDAP server certificate.</description>
 		</field>
 		<field>
 			<name>port</name>
@@ -129,7 +131,7 @@
 			<type>input</type>
 			<size>8</size>
 			<bindstofield>ovpnserver->step2->port</bindstofield>
-			<description>LDAP Server port, leave blank for the default (389 for TCP or STARTTLS, 636 for SSL).</description>
+			<description>LDAP Server port, leave blank for the default (389 for TCP or STARTTLS, 636 for SSL/TLS).</description>
 		</field>
 		<field>
 			<name>transport</name>
@@ -138,26 +140,26 @@
 			<bindstofield>ovpnserver->step2->transport</bindstofield>
 			<options>
 				<option>
-					<name>TCP - Standard</name>
-					<value>TCP - Standard</value>
+					<name>Standard TCP</name>
+					<value>Standard TCP</value>
 				</option>
 				<option>
-					<name>TCP - STARTTLS</name>
-					<value>TCP - STARTTLS</value>
+					<name>STARTTLS Encrypted</name>
+					<value>STARTTLS Encrypted</value>
 				</option>
 				<option>
-					<name>SSL - Encrypted</name>
-					<value>SSL - Encrypted</value>
+					<name>SSL/TLS Encrypted</name>
+					<value>SSL/TLS Encrypted</value>
 				</option>
 			</options>
-			<description>&lt;br/&gt;The transport used by the LDAP server. It can either be standard TCP or SSL encrypted.</description>
+			<description>&lt;br/&gt;The transport used by the LDAP server. It can either be standard TCP, STARTTLS or SSL/TLS Encrypted.</description>
 		</field>
 		<field>
 			<type>certca_selection</type>
 			<name>ldap_caref</name>
 			<displayname>Peer Certificate Authority</displayname>
 			<bindstofield>ovpnserver->step2->ldap_caref</bindstofield>
-			<description>&lt;br/&gt;The Certificate Authority for the LDAP server certificate. Used for SSL and STARTTLS.</description>
+			<description>&lt;br/&gt;The Certificate Authority for the LDAP server certificate. Used for SSL/TLS and STARTTLS.</description>
 			<add_to_certca_selection>global</add_to_certca_selection>
 		</field>
 		<field>
@@ -301,6 +303,14 @@
 			<typehint>Do not strip away parts of the username after the @ symbol.</typehint>
 			<description>e.g. user@host becomes user when unchecked.</description>
 			<bindstofield>ovpnserver->step2->ldap_nostrip_at</bindstofield>
+		</field>
+		<field>
+			<name>ldap_allow_unauthenticated</name>
+			<displayname>Allow unauthenticated bind</displayname>
+			<type>checkbox</type>
+			<typehint>Allow unauthenticated bind</typehint>
+			<description>Unauthenticated binds are bind with an existing login but with an empty password.</description>
+			<bindstofield>ovpnserver->step2->ldap_allow_unauthenticated</bindstofield>
 		</field>
 		<field>
 			<type>submit</type>
@@ -635,10 +645,10 @@
 		<field>
 			<name>lifetime</name>
 			<displayname>Lifetime</displayname>
-			<description>Lifetime in days. This is commonly set to 3650 (Approximately 10 years.)</description>
+			<description>Lifetime in days. Server certificates should not have a lifetime over 398 days or some platforms may consider the certificate invalid.</description>
 			<type>input</type>
 			<size>10</size>
-			<value>3650</value>
+			<value>398</value>
 			<bindstofield>ovpnserver->step9->lifetime</bindstofield>
 		</field>
 		<field>
@@ -779,47 +789,12 @@
 		<field>
 			<displayname>DH Parameters Length</displayname>
 			<name>dhparameters</name>
-			<type>select</type>
+			<type>select_source</type>
+			<source><![CDATA[openvpn_wizard_get_dhparams()]]></source>
+			<source_name>name</source_name>
+			<source_value>value</source_value>
 			<value>2048</value>
 			<bindstofield>ovpnserver->step10->dhkey</bindstofield>
-			<options>
-				<option>
-					<name>1024 bit</name>
-					<value>1024</value>
-				</option>
-				<option>
-					<name>2048 bit</name>
-					<value>2048</value>
-				</option>
-				<option>
-					<name>3072 bit</name>
-					<value>3072</value>
-				</option>
-				<option>
-					<name>4096 bit</name>
-					<value>4096</value>
-				</option>
-				<option>
-					<name>6144 bit</name>
-					<value>6144</value>
-				</option>
-				<option>
-					<name>7680 bit</name>
-					<value>7680</value>
-				</option>
-				<option>
-					<name>8192 bit</name>
-					<value>8192</value>
-				</option>
-				<option>
-					<name>15360 bit</name>
-					<value>15360</value>
-				</option>
-				<option>
-					<name>16384 bit</name>
-					<value>16384</value>
-				</option>
-			</options>
 			<description>&lt;br/&gt;Length of Diffie-Hellman (DH) key exchange parameters, used for establishing a secure communications channel. The DH parameters are different from key sizes, but as with other such settings, the larger the key, the more security it offers, but larger keys take considerably more time to generate. As of 2016, 2048 bit is a common and typical selection.</description>
 		</field>
 		<field>
@@ -1051,14 +1026,6 @@
 			<type>input</type>
 			<bindstofield>ovpnserver->step10->wins2</bindstofield>
 			<description>A Windows Internet Name Service (WINS) server IP to provide to connecting clients. Not desirable in most all modern networks.</description>
-		</field>
-		<field>
-			<name>Advanced</name>
-			<type>textarea</type>
-			<cols>30</cols>
-			<rows>5</rows>
-			<description>Enter any additional options to add to the OpenVPN server configuration here, separated by a semicolon. EXAMPLE: push "route 10.0.0.0 255.255.255.0"</description>
-			<bindstofield>ovpnserver->step10->advanced</bindstofield>
 		</field>
 		<field>
 			<name>Next</name>

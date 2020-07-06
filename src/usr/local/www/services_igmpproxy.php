@@ -3,7 +3,9 @@
  * services_igmpproxy.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -32,15 +34,9 @@
 
 require_once("guiconfig.inc");
 
-if(!is_array($config['igmpproxy'])){
-	$config['igmpproxy'] = array();
-}
-
-if (!is_array($config['igmpproxy']['igmpentry'])) {
-	$config['igmpproxy']['igmpentry'] = array();
-}
-
 //igmpproxy_sort();
+
+init_config_arr(array('igmpproxy', 'igmpentry'));
 $a_igmpproxy = &$config['igmpproxy']['igmpentry'];
 
 if ($_POST['apply']) {
@@ -57,6 +53,7 @@ if ($_POST['apply']) {
 if (isset($config['igmpproxy']['enable'])) {
 	$pconfig['enable'] = true;
 }
+$pconfig['igmpxverbose'] = isset($config['syslog']['igmpxverbose']);
 
 if ($_POST['save']) {
 	$pconfig = $_POST;
@@ -65,6 +62,7 @@ if ($_POST['save']) {
 	} else {
 		unset($config['igmpproxy']['enable']);
 	}
+	$config['syslog']['igmpxverbose'] = $_POST['igmpxverbose'] ? true : false;
 	write_config();
 	mark_subsystem_dirty('igmpproxy');
 	header("Location: services_igmpproxy.php");
@@ -106,6 +104,13 @@ $section->addInput(new Form_Checkbox(
 	$pconfig['enable']
 ));
 
+$section->addInput(new Form_Checkbox(
+	'igmpxverbose',
+	'Verbose Logging',
+	'Enable verbose logging (Default is terse logging)',
+	$pconfig['igmpxverbose']
+));
+
 $form->add($section);
 
 print($form);
@@ -141,7 +146,7 @@ foreach ($a_igmpproxy as $igmpentry):
 							<td>
 <?php
 	$addresses = implode(", ", array_slice(explode(" ", $igmpentry['address']), 0, 10));
-	print($addresses);
+	print(htmlspecialchars($addresses));
 
 	if (!is_array($igmpentry['address']) || count($igmpentry['address']) < 10) {
 		print(' ');

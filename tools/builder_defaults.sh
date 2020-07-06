@@ -3,7 +3,9 @@
 # builder_defaults.sh
 #
 # part of pfSense (https://www.pfsense.org)
-# Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+# Copyright (c) 2004-2013 BSD Perimeter
+# Copyright (c) 2013-2016 Electric Sheep Fencing
+# Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
 # All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -106,7 +108,7 @@ GIT_REPO_BASE=$(git -C ${BUILDER_ROOT} config --get remote.origin.url | sed -e '
 
 # This is used for using svn for retrieving src
 export FREEBSD_REPO_BASE=${FREEBSD_REPO_BASE:-"${GIT_REPO_BASE}/freebsd-src.git"}
-export FREEBSD_BRANCH=${FREEBSD_BRANCH:-"RELENG_2_4_4"}
+export FREEBSD_BRANCH=${FREEBSD_BRANCH:-"devel-12"}
 export FREEBSD_SRC_DIR=${FREEBSD_SRC_DIR:-"${SCRATCHDIR}/FreeBSD-src"}
 
 export BUILD_KERNELS=${BUILD_KERNELS:-"${PRODUCT_NAME}"}
@@ -135,14 +137,14 @@ export KERNEL_BUILD_PATH=${KERNEL_BUILD_PATH:-"${SCRATCHDIR}/kernels"}
 # Do not touch builder /usr/obj
 export MAKEOBJDIRPREFIX=${MAKEOBJDIRPREFIX:-"${SCRATCHDIR}/obj"}
 
-export MODULES_OVERRIDE=${MODULES_OVERRIDE:-"aesni amdtemp coretemp cryptodev cpuctl drm2 fdescfs dummynet hwpmc i2c if_stf ipdivert ipfw ipmi ix ixv ndis nmdm opensolaris sfxge vmm zfs"}
+export MODULES_OVERRIDE=${MODULES_OVERRIDE:-"aesni amdtemp amdsmn coretemp cryptodev cpuctl drm2 fdescfs dummynet hwpmc i2c if_stf ipdivert ipfw ipmi ix ixv ndis nmdm opensolaris sfxge vmm zfs usb/urndis usb/cdce usb/ipheth"}
 
 # gnid
 export GNID_REPO_BASE=${GNID_REPO_BASE:-"${GIT_REPO_BASE}/gnid.git"}
 export GNID_SRC_DIR=${GNID_SRC_DIR:-"${SCRATCHDIR}/gnid"}
 export GNID_BRANCH=${GNID_BRANCH:-"master"}
-export GNID_INCLUDE_DIR=${GNID_INCLUDE_DIR:-"${MAKEOBJDIRPREFIX}/${FREEBSD_SRC_DIR}/tmp/usr/include"}
-export GNID_LIBCRYPTO_DIR=${GNID_LIBCRYPTO_DIR:-"${MAKEOBJDIRPREFIX}/${FREEBSD_SRC_DIR}/secure/lib/libcrypto"}
+export GNID_INCLUDE_DIR=${GNID_INCLUDE_DIR:-"${MAKEOBJDIRPREFIX}${FREEBSD_SRC_DIR}/${TARGET}.${TARGET_ARCH}/tmp/usr/include"}
+export GNID_LIBCRYPTO_DIR=${GNID_LIBCRYPTO_DIR:-"${MAKEOBJDIRPREFIX}${FREEBSD_SRC_DIR}/${TARGET}.${TARGET_ARCH}/secure/lib/libcrypto"}
 
 # Area that the final image will appear in
 export IMAGES_FINAL_DIR=${IMAGES_FINAL_DIR:-"${SCRATCHDIR}/${PRODUCT_NAME}/"}
@@ -254,9 +256,8 @@ case "${PRODUCT_VERSION##*-}" in
 esac
 
 export BUILDER_PKG_DEPENDENCIES="devel/git ftp/curl net/rsync sysutils/screen \
-    sysutils/vmdktool sysutils/py-salt security/sudo www/nginx \
-    emulators/qemu-user-static security/sssd security/pam_ldap \
-    security/pam_mkhomedir archivers/gtar textproc/xmlstarlet"
+    sysutils/vmdktool security/sudo www/nginx emulators/qemu-user-static \
+    archivers/gtar textproc/xmlstarlet"
 
 STAGING_HOSTNAME=${STAGING_HOSTNAME:-"release-staging.nyi.netgate.com"}
 
@@ -285,11 +286,11 @@ export PKG_REPO_SERVER_RELEASE=${PKG_REPO_SERVER_RELEASE:-"pkg+https://pkg.pfsen
 export PKG_REPO_SERVER_STAGING=${PKG_REPO_SERVER_STAGING:-"pkg+http://${STAGING_HOSTNAME}/ce/packages"}
 
 if [ -n "${_IS_RELEASE}" -o -n "${_IS_RC}" ]; then
-	export PKG_REPO_BRANCH_RELEASE=${PKG_REPO_BRANCH_RELEASE:-"${REPO_BRANCH_PREFIX}v2_4_3"}
+	export PKG_REPO_BRANCH_RELEASE=${PKG_REPO_BRANCH_RELEASE:-"${REPO_BRANCH_PREFIX}v2_4_5"}
 	export PKG_REPO_BRANCH_DEVEL=${PKG_REPO_BRANCH_DEVEL:-${POUDRIERE_BRANCH}}
 	export PKG_REPO_BRANCH_STAGING=${PKG_REPO_BRANCH_STAGING:-${PKG_REPO_BRANCH_RELEASE}}
 else
-	export PKG_REPO_BRANCH_RELEASE=${PKG_REPO_BRANCH_RELEASE:-"${REPO_BRANCH_PREFIX}v2_4_3"}
+	export PKG_REPO_BRANCH_RELEASE=${PKG_REPO_BRANCH_RELEASE:-"${REPO_BRANCH_PREFIX}v2_4_5"}
 	export PKG_REPO_BRANCH_DEVEL=${PKG_REPO_BRANCH_DEVEL:-${POUDRIERE_BRANCH}}
 	export PKG_REPO_BRANCH_STAGING=${PKG_REPO_BRANCH_STAGING:-${PKG_REPO_BRANCH_DEVEL}}
 fi
@@ -300,7 +301,7 @@ else
 	export PKG_REPO_SIGN_KEY=${PKG_REPO_SIGN_KEY:-"beta${PRODUCT_NAME_SUFFIX}"}
 fi
 # Command used to sign pkg repo
-: ${PKG_REPO_SIGNING_COMMAND="ssh sign@codesigner.netgate.com sudo ./sign.sh ${PKG_REPO_SIGN_KEY}"}
+: ${PKG_REPO_SIGNING_COMMAND="ssh -o StrictHostKeyChecking=no sign@codesigner.netgate.com sudo ./sign.sh ${PKG_REPO_SIGN_KEY}"}
 export PKG_REPO_SIGNING_COMMAND
 export DO_NOT_SIGN_PKG_REPO=${DO_NOT_SIGN_PKG_REPO:-}
 

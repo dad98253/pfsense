@@ -3,7 +3,9 @@
  * ipsec.widget.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2004-2005 T. Lechat <dev@lechat.org> (BSD 2 clause)
  * Copyright (c) 2007 Jonathan Watt <jwatt@jwatt.org> (BSD 2 clause)
  * Copyright (c) 2007 Scott Dale (BSD 2 clause)
@@ -123,58 +125,71 @@ if ($_REQUEST && $_REQUEST['ajax']) {
 	}
 
 	// Generate JSON formatted data for the widget to update from
-	$jsondata = "{";
-
-	$jsondata .= "\"overview\":\"";
-	$jsondata .= "<tr>";
-	$jsondata .= "<td>" . $activecounter . "</td>";
-	$jsondata .= "<td>" . $inactivecounter . "</td>";
-	$jsondata .= "<td>" . (is_array($mobile['pool']) ? htmlspecialchars($mobile['pool'][0]['usage']) : '0') . "</td>";
-	$jsondata .= "</tr>";
-	$jsondata .= "\",\n";
-
-	$jsondata .= "\"tunnel\":\"";
-	if(is_array($ipsec_detail_array) && !empty($ipsec_detail_array)){
-		foreach ($ipsec_detail_array as $ipsec) {
-			$jsondata .= "<tr>";
-			$jsondata .= "<td>" . htmlspecialchars($ipsec['src']) . "</td>";
-			$jsondata .= "<td>" . $ipsec['remote-subnet'] . "<br />(" . htmlspecialchars($ipsec['dest']) . ")</td>";
-			$jsondata .= "<td>" . htmlspecialchars($ipsec['descr']) . "</td>";
-
-			if ($ipsec['status'] == "true") {
-				$jsondata .= '<td><i class=\"fa fa-arrow-up text-success\"></i></td>';
-			} else {
-				$jsondata .= '<td><i class=\"fa fa-arrow-down text-danger\"></i></td>';
-			}
-
-			$jsondata .= "</tr>";
+	$data = new stdClass();
+	$data->overview = "<tr>";
+	$data->overview .= "<td>" . $activecounter . "</td>";
+	$data->overview .= "<td>" . $inactivecounter . "</td>";
+	$mobileusage = 0;
+	if (is_array($mobile['pool'])) {
+		foreach ($mobile['pool'] as $pool) {
+			$mobileusage += $pool['online'] + $pool['offline'];
 		}
 	}
+	$data->overview .= "<td>" . htmlspecialchars($mobileusage) . "</td>";
+	$data->overview .= "</tr>";
 
-	$jsondata .= "\",\n";
-
-
-	$jsondata .= "\"mobile\":\"";
-
+	$data->tunnel = "";
+	if(is_array($ipsec_detail_array) && !empty($ipsec_detail_array)){
+		foreach ($ipsec_detail_array as $ipsec) {
+			$data->tunnel .= "<tr>";
+			$data->tunnel .= "<td>" . htmlspecialchars($ipsec['src']) . "</td>";
+			$data->tunnel .= "<td>" . $ipsec['remote-subnet'] . "<br />(" . htmlspecialchars($ipsec['dest']) . ")</td>";
+			$data->tunnel .= "<td>" . htmlspecialchars($ipsec['descr']) . "</td>";
+			if ($ipsec['status'] == "true") {
+				$data->tunnel .= '<td><i class="fa fa-arrow-up text-success"></i></td>';
+			} else {
+				$data->tunnel .= '<td><i class="fa fa-arrow-down text-danger"></i></td>';
+			}
+			$data->tunnel .= "</tr>";
+		}
+	}
+	
+	$data->mobile = "";
 	if (is_array($mobile['pool'])) {
+		$mucount = 0;
 		foreach ($mobile['pool'] as $pool) {
 			if (!is_array($pool['lease'])) {
 				continue;
 			}
 			if(is_array($pool['lease']) && !empty($pool['lease'])){
 				foreach ($pool['lease'] as $muser) {
-					$jsondata .= "<tr>";
-					$jsondata .= "<td>" . htmlspecialchars($muser['id']) . "</td>";
-					$jsondata .= "<td>" . htmlspecialchars($muser['host']) . "</td>";
-					$jsondata .= "<td>" . htmlspecialchars($muser['status']) . "</td>";
-					$jsondata .= "</tr>";
+					$mucount++;
+					if ($muser['status'] == 'online') {
+						$data->mobile .= "<tr style='background-color: #c5e5bb'>";
+					} else {
+						$data->mobile .= "<tr>";
+					}
+					$data->mobile .= "<td>" . htmlspecialchars($muser['id']) . "</td>";
+					$data->mobile .= "<td>" . htmlspecialchars($muser['host']) . "</td>";
+					$data->mobile .= "<td>";
+					if ($muser['status'] == 'online') {
+						$data->mobile .= "<span class='fa fa-check'></span><span style='font-weight: bold'> ";
+					} else {
+						$data->mobile .= "<span>  ";
+					}
+					$data->mobile .= htmlspecialchars($muser['status']) . "</span></td>";
+					$data->mobile .= "</tr>";
 				}
 			}
 		}
+		if ($mucount == 0) {
+			$data->mobile .= '<tr><td colspan="3">' . gettext("No mobile leases") . '</tr>';
+		}
+	} else {
+		$data->mobile .= '<tr><td colspan="3">' . gettext("No mobile pools configured") . '</tr>';
 	}
-
-	$jsondata .= "\"}";
-	print($jsondata);
+	
+	print(json_encode($data));
 	exit;
 }
 

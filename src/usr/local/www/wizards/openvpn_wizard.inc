@@ -3,7 +3,9 @@
  * openvpn_wizard.inc
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -26,21 +28,26 @@ require_once("openvpn.inc");
 require_once("util.inc");
 
 // Load valid country codes
-$dn_cc = array();
-if (file_exists("/etc/ca_countries")) {
-	$dn_cc_file=file("/etc/ca_countries");
-	$dn_cc[''] = gettext("None");
-	foreach ($dn_cc_file as $line) {
-		if (preg_match('/^(\S*)\s(.*)$/', $line, $matches)) {
-			$dn_cc[$matches[1]] = $matches[1];
-		}
+$dn_cc = get_cert_country_codes();
+
+function openvpn_wizard_get_dhparams() {
+	global $openvpn_dh_lengths;
+	$dhparams = array();
+	foreach ($openvpn_dh_lengths as $value => $name) {
+		$dhparams[] = array(
+			"value" => $value,
+			"name" => $name
+		);
 	}
+	return $dhparams;
 }
 
 function step1_stepsubmitbeforesave() {
 	global $stepid, $config;
 	if (($_POST['authtype'] != NULL) && ($_POST['authtype'] != $config['ovpnserver']['step1']['type'])) {
-		unset($config['ovpnserver']['step2']);
+		if (isset($config['ovpnserver']['step2'])) {
+			unset($config['ovpnserver']['step2']);
+		}
 	}
 }
 
@@ -54,14 +61,16 @@ function step1_submitphpaction() {
 	} else if ($_POST['authtype'] == "radius") {
 		$stepid = 2;
 		$config['ovpnserver']['step1']['type'] = "radius";
-		unset($config['ovpnserver']['step1']['uselist']);
+		if (isset($config['ovpnserver']['step1']['uselist'])) {
+			unset($config['ovpnserver']['step1']['uselist']);
+		}
 	}
 }
 
 function step2_stepbeforeformdisplay() {
 	global $pkg, $stepid;
 
-	$fields =& $pkg['step'][1]['fields']['field'];
+	$fields = &$pkg['step'][1]['fields']['field'];
 
 	$found = false;
 	$authlist = auth_get_authserver_list();
@@ -94,9 +103,9 @@ function step3_submitphpaction() {
 
 	/* Default LDAP port is 389 for TCP and 636 for SSL */
 	if (empty($_POST['port'])) {
-		if (($_POST['transport'] == "TCP - Standard") || ($_POST['transport'] == "TCP - STARTTLS"))
+		if (($_POST['transport'] == "Standard TCP") || ($_POST['transport'] == "STARTTLS Encrypted"))
 			$config['ovpnserver']['step2']['port'] = 389;
-		elseif ($_POST['transport'] == "SSL - Encrypted")
+		elseif ($_POST['transport'] == "SSL/TLS Encrypted")
 			$config['ovpnserver']['step2']['port'] = 636;
 	} elseif (!is_port($_POST['port'])) {
 		$stepid--;
@@ -123,7 +132,7 @@ function step3_submitphpaction() {
 function step4_stepbeforeformdisplay() {
 	global $pkg, $stepid;
 
-	$fields =& $pkg['step'][3]['fields']['field'];
+	$fields = &$pkg['step'][3]['fields']['field'];
 
 	$found = false;
 	$authlist = auth_get_authserver_list();
@@ -189,7 +198,9 @@ function step6_submitphpaction() {
 
 	if (isset($_POST['next'])) {
 		$_POST['uselist'] = "";
-		unset($config['ovpnserver']['step6']['uselist']);
+		if (isset($config['ovpnserver']['step6']['uselist'])) {
+			unset($config['ovpnserver']['step6']['uselist']);
+		}
 		$stepid++;
 	} else {
 		$config['ovpnserver']['step6']['uselist'] = "on";
@@ -243,7 +254,9 @@ function step8_submitphpaction() {
 
 	if (isset($_POST['next'])) {
 		$_POST['uselist'] = "";
-		unset($config['ovpnserver']['step9']['uselist']);
+		if (isset($config['ovpnserver']['step9']['uselist'])) {
+			unset($config['ovpnserver']['step9']['uselist']);
+		}
 		$stepid++;
 	} else {
 		$config['ovpnserver']['step9']['uselist'] = "on";
@@ -263,13 +276,13 @@ function step9_stepbeforeformdisplay() {
 		$org = $pconfig['step6']['organization'];
 	} else {
 		$ca = lookup_ca($pconfig['step6']['authcertca']);
-		$cavl = cert_get_subject_array($ca['crt']);
-		$country = $cavl[0]['v'];
-		$state = $cavl[1]['v'];
-		$city = $cavl[2]['v'];
-		$org = $cavl[3]['v'];
+		$cavl = cert_get_subject_hash($ca['crt']);
+		$country = $cavl['C'];
+		$state = $cavl['ST'];
+		$city = $cavl['L'];
+		$org = $cavl['O'];
 	}
-	$fields =& $pkg['step'][$stepid]['fields']['field'];
+	$fields = &$pkg['step'][$stepid]['fields']['field'];
 
 	foreach ($fields as $idx => $field) {
 		switch ($field['name']) {
@@ -459,10 +472,7 @@ function step12_submitphpaction() {
 		if ($auth['type'] == "ldap") {
 			$auth['host'] = $pconfig['step2']['ip'];
 			$auth['ldap_port'] = $pconfig['step2']['port'];
-			if ($pconfig['step1']['transport'] == "tcp")
-				$auth['ldap_urltype'] = 'TCP - Standard';
-			else
-				$auth['ldap_urltype'] = 'SSL - Encrypted';
+			$auth['ldap_urltype'] = $pconfig['step2']['transport'];
 			$auth['ldap_caref'] = $pconfig['step2']['ldap_caref'];
 			$auth['ldap_protver'] = $pconfig['step2']['ldap_protver'];
 			$auth['ldap_timeout'] = $pconfig['step2']['ldap_timeout'];
@@ -480,6 +490,7 @@ function step12_submitphpaction() {
 			$auth['ldap_attr_groupobj'] = $pconfig['step2']['ldap_attr_groupobj'];
 			$auth['ldap_utf8'] = isset($pconfig['step2']['ldap_utf8']);
 			$auth['ldap_nostrip_at'] = isset($pconfig['step2']['ldap_nostrip_at']);
+			$auth['ldap_allow_unauthenticated'] = isset($pconfig['step2']['ldap_allow_unauthenticated']);
 
 		} else if ($auth['type'] == "radius") {
 			$auth['host'] = $pconfig['step2']['ip'];
@@ -596,7 +607,6 @@ function step12_submitphpaction() {
 	if (strlen($pconfig['step10']['descr']) > 30)
 		$pconfig['step10']['descr'] = substr($pconfig['step10']['descr'], 0, 30);
 	$server['description'] = $pconfig['step10']['descr'];
-	$server['custom_options'] = $pconfig['step10']['advanced'];
 	if (isset($pconfig['step10']['tlsauth'])) {
 		if (isset($pconfig['step10']['gentlskey']))
 			$tlskey = openvpn_create_key();

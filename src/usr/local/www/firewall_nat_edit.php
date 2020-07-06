@@ -3,7 +3,9 @@
  * firewall_nat_edit.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -46,11 +48,11 @@ foreach ($ifdisp as $kif => $kdescr) {
 	$specialsrcdst[] = "{$kif}ip";
 }
 
-if (!is_array($config['nat']['rule'])) {
-	$config['nat']['rule'] = array();
-}
-
+init_config_arr(array('filter', 'rule'));
+init_config_arr(array('nat', 'separator'));
+init_config_arr(array('nat', 'rule'));
 $a_nat = &$config['nat']['rule'];
+$a_separators = &$config['nat']['separator'];
 
 if (isset($_REQUEST['id']) && is_numericint($_REQUEST['id'])) {
 	$id = $_REQUEST['id'];
@@ -84,6 +86,11 @@ if (isset($id) && $a_nat[$id]) {
 	address_to_pconfig($a_nat[$id]['destination'], $pconfig['dst'],
 		$pconfig['dstmask'], $pconfig['dstnot'],
 		$pconfig['dstbeginport'], $pconfig['dstendport']);
+
+	if (($pconfig['dstbeginport'] == 1) && ($pconfig['dstendport'] == 65535)) {
+		$pconfig['dstbeginport'] = "any";
+		$pconfig['dstendport'] = "any";
+	}
 
 	$pconfig['proto'] = $a_nat[$id]['protocol'];
 	$pconfig['localip'] = $a_nat[$id]['target'];
@@ -155,8 +162,9 @@ if ($_POST['save']) {
 		}
 
 		if ($_POST['dstbeginport'] == "any") {
-			$_POST['dstbeginport'] = 0;
-			$_POST['dstendport'] = 0;
+			$_POST['dstbeginport'] = "1";
+			$_POST['dstendport'] = "65535";
+			$_POST['localbeginport'] = "1";
 		} else {
 			if (!$_POST['dstendport']) {
 				$_POST['dstendport'] = $_POST['dstbeginport'];
@@ -514,7 +522,6 @@ if ($_POST['save']) {
 				array_splice($a_nat, $after+1, 0, array($natent));
 
 				// Update the separators
-				$a_separators = &$config['nat']['separator'];
 				$ridx = $after;
 				$mvnrows = +1;
 				move_separators($a_separators, $ridx, $mvnrows);
@@ -980,9 +987,17 @@ events.push(function() {
 
 		if (($('#dstbeginport').find(":selected").index() == 0) && portsenabled) {
 			disableInput('dstbeginport_cust', false);
+			disableInput('localbeginport', false);
+		} else if (($('#dstbeginport').find(":selected").index() == 1) && portsenabled) {
+			$('#dstbeginport_cust').val('');
+			disableInput('dstbeginport_cust', true);
+			disableInput('localbeginport', true);
+			disableInput('localbeginport_cust', true);
 		} else {
 			$('#dstbeginport_cust').val('');
 			disableInput('dstbeginport_cust', true);
+			disableInput('localbeginport', false);
+			disableInput('localbeginport_cust', false);
 		}
 
 		if (($('#dstendport').find(":selected").index() == 0) && portsenabled) {
@@ -992,7 +1007,8 @@ events.push(function() {
 			disableInput('dstendport_cust', true);
 		}
 
-		if (($('#localbeginport').find(":selected").index() == 0) && portsenabled) {
+		if (($('#localbeginport').find(":selected").index() == 0) &&
+		    ($('#dstbeginport').find(":selected").index() != 1) && portsenabled) {
 			disableInput('localbeginport_cust', false);
 		} else {
 			$('#localbeginport_cust').val('');
@@ -1166,11 +1182,11 @@ events.push(function() {
 		typesel_change();
 	});
 
-	$('#srctype').click(function () {
+	$('#srctype').change(function () {
 		typesel_change();
 	});
 
-	$('#dsttype').click(function () {
+	$('#dsttype').change(function () {
 		typesel_change();
 	});
 
@@ -1195,7 +1211,7 @@ if (!$_POST) {
 	nordr_change();
 
 	// --------- Autocomplete -----------------------------------------------------------------------------------------
-	var addressarray = <?= json_encode(get_alias_list(array("host", "network", "openvpn", "urltable"))) ?>;
+	var addressarray = <?= json_encode(get_alias_list(array("host", "network", "urltable"))) ?>;
 	var customarray = <?= json_encode(get_alias_list(array("port", "url_ports", "urltable_ports"))) ?>;
 
 	$('#localip, #src, #dst').autocomplete({

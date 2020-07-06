@@ -3,7 +3,9 @@
 # builder_common.sh
 #
 # part of pfSense (https://www.pfsense.org)
-# Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+# Copyright (c) 2004-2013 BSD Perimeter
+# Copyright (c) 2013-2016 Electric Sheep Fencing
+# Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
 # All rights reserved.
 #
 # FreeSBIE portions of the code
@@ -67,6 +69,7 @@ core_pkg_create_repo() {
 	ln -sf $(basename ${CORE_PKG_REAL_PATH}) ${CORE_PKG_PATH}/.latest
 	ln -sf .latest/All ${CORE_PKG_ALL_PATH}
 	ln -sf .latest/digests.txz ${CORE_PKG_PATH}/digests.txz
+	ln -sf .latest/meta.conf ${CORE_PKG_PATH}/meta.conf
 	ln -sf .latest/meta.txz ${CORE_PKG_PATH}/meta.txz
 	ln -sf .latest/packagesite.txz ${CORE_PKG_PATH}/packagesite.txz
 }
@@ -268,11 +271,7 @@ make_world() {
 		|| print_error_pfS
 
 	# Use the builder cross compiler from obj to produce the final binary.
-	if [ "${TARGET_ARCH}" == "$(uname -p)" ]; then
-		BUILD_CC="${MAKEOBJDIRPREFIX}/${FREEBSD_SRC_DIR}/tmp/usr/bin/cc"
-	else
-		BUILD_CC="${MAKEOBJDIRPREFIX}/${TARGET}.${TARGET_ARCH}${FREEBSD_SRC_DIR}/tmp/usr/bin/cc"
-	fi
+	BUILD_CC="${MAKEOBJDIRPREFIX}${FREEBSD_SRC_DIR}/${TARGET}.${TARGET_ARCH}/tmp/usr/bin/cc"
 
 	[ -f "${BUILD_CC}" ] || print_error_pfS
 
@@ -580,11 +579,6 @@ clone_to_staging_area() {
 	tar -C ${PRODUCT_SRC} -c -f - . | \
 		tar -C ${STAGE_CHROOT_DIR} -x -p -f -
 
-	if [ "${PRODUCT_NAME}" != "pfSense" ]; then
-		mv ${STAGE_CHROOT_DIR}/usr/local/sbin/pfSense-upgrade \
-			${STAGE_CHROOT_DIR}/usr/local/sbin/${PRODUCT_NAME}-upgrade
-	fi
-
 	mkdir -p ${STAGE_CHROOT_DIR}/etc/mtree
 	mtree -Pcp ${STAGE_CHROOT_DIR}/var > ${STAGE_CHROOT_DIR}/etc/mtree/var.dist
 	mtree -Pcp ${STAGE_CHROOT_DIR}/etc > ${STAGE_CHROOT_DIR}/etc/mtree/etc.dist
@@ -865,6 +859,7 @@ create_memstick_image() {
 
 	echo 'autoboot_delay="3"' > ${LOADERCONF}
 	echo 'kern.cam.boot_delay=10000' >> ${LOADERCONF}
+	echo 'boot_serial="NO"' >> ${LOADERCONF}
 	cat ${LOADERCONF} > ${FINAL_CHROOT_DIR}/boot/loader.conf
 
 	create_distribution_tarball
@@ -992,8 +987,8 @@ get_altabi_arch() {
 		echo "x86:64"
 	elif [ "${_target_arch}" = "i386" ]; then
 		echo "x86:32"
-	elif [ "${_target_arch}" = "armv6" ]; then
-		echo "32:el:eabi:hardfp"
+	elif [ "${_target_arch}" = "armv7" ]; then
+		echo "32:el:eabi:softfp"
 	else
 		echo ">>> ERROR: Invalid arch"
 		print_error_pfS
@@ -1325,6 +1320,7 @@ finish() {
 pkg_repo_rsync() {
 	local _repo_path_param="${1}"
 	local _ignore_final_rsync="${2}"
+	local _aws_sync_cmd="aws s3 sync --quiet --exclude '.real*/*' --exclude '.latest/*'"
 
 	if [ -z "${_repo_path_param}" -o ! -d "${_repo_path_param}" ]; then
 		return
@@ -1395,12 +1391,12 @@ pkg_repo_rsync() {
 
 	for _pkg_rsync_hostname in ${PKG_RSYNC_HOSTNAME}; do
 		# Make sure destination directory exist
-		ssh -p ${PKG_RSYNC_SSH_PORT} \
+		ssh -o StrictHostKeyChecking=no -p ${PKG_RSYNC_SSH_PORT} \
 			${PKG_RSYNC_USERNAME}@${_pkg_rsync_hostname} \
 			"mkdir -p ${PKG_RSYNC_DESTDIR}"
 
 		echo -n ">>> Sending updated repository to ${_pkg_rsync_hostname}... " | tee -a ${_logfile}
-		if script -aq ${_logfile} rsync -Have "ssh -p ${PKG_RSYNC_SSH_PORT}" \
+		if script -aq ${_logfile} rsync -Have "ssh -o StrictHostKeyChecking=no -p ${PKG_RSYNC_SSH_PORT}" \
 			--timeout=60 --delete-delay ${_repo_path} \
 			${PKG_RSYNC_USERNAME}@${_pkg_rsync_hostname}:${PKG_RSYNC_DESTDIR} >/dev/null 2>&1
 		then
@@ -1418,14 +1414,14 @@ pkg_repo_rsync() {
 		if [ -n "${_IS_RELEASE}" -o "${_repo_path_param}" = "${CORE_PKG_PATH}" ]; then
 			for _pkg_final_rsync_hostname in ${PKG_FINAL_RSYNC_HOSTNAME}; do
 				# Send .real* directories first to prevent having a broken repo while transfer happens
-				local _cmd="rsync -Have \"ssh -p ${PKG_FINAL_RSYNC_SSH_PORT}\" \
+				local _cmd="rsync -Have \"ssh -o StrictHostKeyChecking=no -p ${PKG_FINAL_RSYNC_SSH_PORT}\" \
 					--timeout=60 ${PKG_RSYNC_DESTDIR}/./${_repo_base%%-core}* \
 					--include=\"/*\" --include=\"*/.real*\" --include=\"*/.real*/***\" \
 					--exclude=\"*\" \
 					${PKG_FINAL_RSYNC_USERNAME}@${_pkg_final_rsync_hostname}:${PKG_FINAL_RSYNC_DESTDIR}"
 
 				echo -n ">>> Sending updated packages to ${_pkg_final_rsync_hostname}... " | tee -a ${_logfile}
-				if script -aq ${_logfile} ssh -p ${PKG_RSYNC_SSH_PORT} \
+				if script -aq ${_logfile} ssh -o StrictHostKeyChecking=no -p ${PKG_RSYNC_SSH_PORT} \
 					${PKG_RSYNC_USERNAME}@${_pkg_rsync_hostname} ${_cmd} >/dev/null 2>&1; then
 					echo "Done!" | tee -a ${_logfile}
 				else
@@ -1434,12 +1430,12 @@ pkg_repo_rsync() {
 					print_error_pfS
 				fi
 
-				_cmd="rsync -Have \"ssh -p ${PKG_FINAL_RSYNC_SSH_PORT}\" \
+				_cmd="rsync -Have \"ssh -o StrictHostKeyChecking=no -p ${PKG_FINAL_RSYNC_SSH_PORT}\" \
 					--timeout=60 --delete-delay ${PKG_RSYNC_DESTDIR}/./${_repo_base%%-core}* \
 					${PKG_FINAL_RSYNC_USERNAME}@${_pkg_final_rsync_hostname}:${PKG_FINAL_RSYNC_DESTDIR}"
 
 				echo -n ">>> Sending updated repositories metadata to ${_pkg_final_rsync_hostname}... " | tee -a ${_logfile}
-				if script -aq ${_logfile} ssh -p ${PKG_RSYNC_SSH_PORT} \
+				if script -aq ${_logfile} ssh -o StrictHostKeyChecking=no -p ${PKG_RSYNC_SSH_PORT} \
 					${PKG_RSYNC_USERNAME}@${_pkg_rsync_hostname} ${_cmd} >/dev/null 2>&1; then
 					echo "Done!" | tee -a ${_logfile}
 				else
@@ -1447,6 +1443,36 @@ pkg_repo_rsync() {
 					echo ">>> ERROR: An error occurred sending repo to final hostname"
 					print_error_pfS
 				fi
+
+				if [ -z "${PKG_FINAL_S3_PATH}" ]; then
+					continue
+				fi
+
+				local _repos=$(ssh -o StrictHostKeyChecking=no -p ${PKG_FINAL_RSYNC_SSH_PORT} \
+				    ${PKG_FINAL_RSYNC_USERNAME}@${_pkg_final_rsync_hostname} \
+				    "ls -1d ${PKG_FINAL_RSYNC_DESTDIR}/${_repo_base%%-core}*")
+				for _repo in ${_repos}; do
+					echo -n ">>> Sending updated packages to AWS ${PKG_FINAL_S3_PATH}... " | tee -a ${_logfile}
+					if script -aq ${_logfile} ssh -o StrictHostKeyChecking=no -p ${PKG_FINAL_RSYNC_SSH_PORT} \
+					    ${PKG_FINAL_RSYNC_USERNAME}@${_pkg_final_rsync_hostname} \
+					    "${_aws_sync_cmd} ${_repo} ${PKG_FINAL_S3_PATH}/$(basename ${_repo})"; then
+						echo "Done!" | tee -a ${_logfile}
+					else
+						echo "Failed!" | tee -a ${_logfile}
+						echo ">>> ERROR: An error occurred sending files to AWS S3"
+						print_error_pfS
+					fi
+					echo -n ">>> Cleaning up packages at AWS ${PKG_FINAL_S3_PATH}... " | tee -a ${_logfile}
+					if script -aq ${_logfile} ssh -o StrictHostKeyChecking=no -p ${PKG_FINAL_RSYNC_SSH_PORT} \
+					    ${PKG_FINAL_RSYNC_USERNAME}@${_pkg_final_rsync_hostname} \
+					    "${_aws_sync_cmd} --delete ${_repo} ${PKG_FINAL_S3_PATH}/$(basename ${_repo})"; then
+						echo "Done!" | tee -a ${_logfile}
+					else
+						echo "Failed!" | tee -a ${_logfile}
+						echo ">>> ERROR: An error occurred sending files to AWS S3"
+						print_error_pfS
+					fi
+				done
 			done
 		fi
 	done
@@ -1456,7 +1482,7 @@ poudriere_possible_archs() {
 	local _arch=$(uname -m)
 	local _archs=""
 
-	# If host is amd64, we'll create both repos, and if possible armv6
+	# If host is amd64, we'll create both repos, and if possible armv7
 	if [ "${_arch}" = "amd64" ]; then
 		_archs="amd64.amd64"
 
@@ -1464,8 +1490,8 @@ poudriere_possible_archs() {
 			# Make sure binmiscctl is ok
 			/usr/local/etc/rc.d/qemu_user_static forcestart >/dev/null 2>&1
 
-			if binmiscctl lookup armv6 >/dev/null 2>&1; then
-				_archs="${_archs} arm.armv6"
+			if binmiscctl lookup armv7 >/dev/null 2>&1; then
+				_archs="${_archs} arm.armv7"
 			fi
 		fi
 	fi
@@ -1516,6 +1542,7 @@ poudriere_rename_ports() {
 		local _pdir=$(dirname ${d})
 		local _pname=$(echo $(basename ${d}) | sed "s,pfSense,${PRODUCT_NAME},")
 		local _plist=""
+		local _pdescr=""
 
 		if [ -e ${_pdir}/${_pname} ]; then
 			rm -rf ${_pdir}/${_pname}
@@ -1527,11 +1554,14 @@ poudriere_rename_ports() {
 			_plist=${_pdir}/${_pname}/pkg-plist
 		fi
 
+		if [ -f ${_pdir}/${_pname}/pkg-descr ]; then
+			_pdescr=${_pdir}/${_pname}/pkg-descr
+		fi
+
 		sed -i '' -e "s,pfSense,${PRODUCT_NAME},g" \
 			  -e "s,https://www.pfsense.org,${PRODUCT_URL},g" \
 			  -e "/^MAINTAINER=/ s,^.*$,MAINTAINER=	${PRODUCT_EMAIL}," \
-			${_pdir}/${_pname}/Makefile \
-			${_pdir}/${_pname}/pkg-descr ${_plist}
+			${_pdir}/${_pname}/Makefile ${_pdescr} ${_plist}
 
 		# PHP module is special
 		if echo "${_pname}" | grep -q "^php[0-9]*-${PRODUCT_NAME}-module"; then
@@ -1539,19 +1569,21 @@ poudriere_rename_ports() {
 			sed -i '' -e "s,PHP_PFSENSE,PHP_${_product_capital},g" \
 				  -e "s,PFSENSE_SHARED_LIBADD,${_product_capital}_SHARED_LIBADD,g" \
 				  -e "s,pfSense,${PRODUCT_NAME},g" \
-				  -e "s,${PRODUCT_NAME}\.c,pfSense.c,g" \
+				  -e "s,pfSense.c,${PRODUCT_NAME}\.c,g" \
 				${_pdir}/${_pname}/files/config.m4
 
 			sed -i '' -e "s,COMPILE_DL_PFSENSE,COMPILE_DL_${_product_capital}," \
 				  -e "s,pfSense_module_entry,${PRODUCT_NAME}_module_entry,g" \
+				  -e "s,php_pfSense.h,php_${PRODUCT_NAME}\.h,g" \
 				  -e "/ZEND_GET_MODULE/ s,pfSense,${PRODUCT_NAME}," \
 				  -e "/PHP_PFSENSE_WORLD_EXTNAME/ s,pfSense,${PRODUCT_NAME}," \
 				${_pdir}/${_pname}/files/pfSense.c \
+				${_pdir}/${_pname}/files/dummynet.c \
 				${_pdir}/${_pname}/files/php_pfSense.h
 		fi
 
 		if [ -d ${_pdir}/${_pname}/files ]; then
-			for fd in $(find ${_pdir}/${_pname}/files -type d -name '*pfSense*'); do
+			for fd in $(find ${_pdir}/${_pname}/files -name '*pfSense*'); do
 				local _fddir=$(dirname ${fd})
 				local _fdname=$(echo $(basename ${fd}) | sed "s,pfSense,${PRODUCT_NAME},")
 
@@ -1643,6 +1675,11 @@ poudriere_init() {
 		echo ">>> ERROR: POUDRIERE_PORTS_GIT_URL is not defined"
 		print_error_pfS
 	fi
+
+	# PARALLEL_JOBS us ncpu / 4 for best performance
+	local _parallel_jobs=$(sysctl -qn hw.ncpu)
+	_parallel_jobs=$((_parallel_jobs / 4))
+
 	echo ">>> Creating poudriere.conf" | tee -a ${LOGFILE}
 	cat <<EOF >/usr/local/etc/poudriere.conf
 ZPOOL=${ZFS_TANK}
@@ -1659,7 +1696,15 @@ ATOMIC_PACKAGE_REPOSITORY=yes
 COMMIT_PACKAGES_ON_FAILURE=no
 KEEP_OLD_PACKAGES=yes
 KEEP_OLD_PACKAGES_COUNT=5
+ALLOW_MAKE_JOBS=yes
+PARALLEL_JOBS=${_parallel_jobs}
 EOF
+
+	if pkg info -e ccache; then
+	cat <<EOF >>/usr/local/etc/poudriere.conf
+CCACHE_DIR=/var/cache/ccache
+EOF
+	fi
 
 	# Create specific items conf
 	[ ! -d /usr/local/etc/poudriere.d ] \
@@ -1676,7 +1721,7 @@ EOF
 
 		if poudriere jail -i -j "${jail_name}" >/dev/null 2>&1; then
 			echo ">>> Poudriere jail ${jail_name} already exists, deleting it..." | tee -a ${LOGFILE}
-			poudriere jail -d -j "${jail_name}" >/dev/null 2>&1
+			poudriere jail -d -j "${jail_name}"
 		fi
 	done
 
@@ -1691,7 +1736,7 @@ EOF
 	for jail_arch in ${_archs}; do
 		jail_name=$(poudriere_jail_name ${jail_arch})
 
-		if [ "${jail_arch}" = "arm.armv6" ]; then
+		if [ "${jail_arch}" = "arm.armv7" ]; then
 			native_xtools="-x"
 		else
 			native_xtools=""
@@ -1729,7 +1774,7 @@ poudriere_update_jails() {
 			_create_or_update_text="Creating"
 		fi
 
-		if [ "${jail_arch}" = "arm.armv6" ]; then
+		if [ "${jail_arch}" = "arm.armv7" ]; then
 			native_xtools="-x"
 		else
 			native_xtools=""
@@ -1767,6 +1812,11 @@ poudriere_bulk() {
 	local _archs=$(poudriere_possible_archs)
 	local _makeconf
 
+	# Create DISTFILES_CACHE if it doesn't exist
+	if [ ! -d /usr/ports/distfiles ]; then
+		mkdir -p /usr/ports/distfiles
+	fi
+
 	LOGFILE=${BUILDER_LOGS}/poudriere.log
 
 	if [ -n "${UPLOAD}" -a -z "${PKG_RSYNC_HOSTNAME}" ]; then
@@ -1787,6 +1837,7 @@ poudriere_bulk() {
 	fi
 
 	cat <<EOF >>/usr/local/etc/poudriere.d/${POUDRIERE_PORTS_NAME}-make.conf
+
 PKG_REPO_BRANCH_DEVEL=${PKG_REPO_BRANCH_DEVEL}
 PKG_REPO_BRANCH_RELEASE=${PKG_REPO_BRANCH_RELEASE}
 PKG_REPO_SERVER_DEVEL=${PKG_REPO_SERVER_DEVEL}
@@ -1844,13 +1895,18 @@ EOF
 			continue
 		fi
 
-		if [ -f "${POUDRIERE_BULK}.${jail_arch}" ]; then
-			_ref_bulk="${POUDRIERE_BULK}.${jail_arch}"
-		else
-			_ref_bulk="${POUDRIERE_BULK}"
+		_ref_bulk=${SCRATCHDIR}/poudriere_bulk.${POUDRIERE_BRANCH}.ref.${jail_arch}
+		rm -rf ${_ref_bulk} ${_ref_bulk}.tmp
+		touch ${_ref_bulk}.tmp
+		if [ -f "${POUDRIERE_BULK}.${jail_arch#*.}" ]; then
+			cat "${POUDRIERE_BULK}.${jail_arch#*.}" >> ${_ref_bulk}.tmp
 		fi
+		if [ -f "${POUDRIERE_BULK}" ]; then
+			cat "${POUDRIERE_BULK}" >> ${_ref_bulk}.tmp
+		fi
+		cat ${_ref_bulk}.tmp | sort -u > ${_ref_bulk}
 
-		_bulk=${SCRATCHDIR}/poudriere_bulk.${POUDRIERE_BRANCH}
+		_bulk=${SCRATCHDIR}/poudriere_bulk.${POUDRIERE_BRANCH}.${jail_arch}
 		sed -e "s,%%PRODUCT_NAME%%,${PRODUCT_NAME},g" ${_ref_bulk} > ${_bulk}
 
 		local _exclude_bulk="${POUDRIERE_BULK}.exclude.${jail_arch}"
@@ -1939,7 +1995,7 @@ snapshots_create_sha256() {
 
 snapshots_scp_files() {
 	if [ -z "${RSYNC_COPY_ARGUMENTS}" ]; then
-		RSYNC_COPY_ARGUMENTS="-ave ssh --timeout=60"
+		RSYNC_COPY_ARGUMENTS="-Have \"ssh -o StrictHostKeyChecking=no\" --timeout=60"
 	fi
 
 	snapshots_update_status ">>> Copying core pkg repo to ${PKG_RSYNC_HOSTNAME}"
@@ -1950,12 +2006,12 @@ snapshots_scp_files() {
 		snapshots_update_status ">>> Copying files to ${_rsyncip}"
 
 		# Ensure directory(s) are available
-		ssh ${RSYNCUSER}@${_rsyncip} "mkdir -p ${RSYNCPATH}/installer"
+		ssh -o StrictHostKeyChecking=no ${RSYNCUSER}@${_rsyncip} "mkdir -p ${RSYNCPATH}/installer"
 		if [ -d $IMAGES_FINAL_DIR/virtualization ]; then
-			ssh ${RSYNCUSER}@${_rsyncip} "mkdir -p ${RSYNCPATH}/virtualization"
+			ssh -o StrictHostKeyChecking=no ${RSYNCUSER}@${_rsyncip} "mkdir -p ${RSYNCPATH}/virtualization"
 		fi
 		# ensure permissions are correct for r+w
-		ssh ${RSYNCUSER}@${_rsyncip} "chmod -R ug+rw ${RSYNCPATH}/."
+		ssh -o StrictHostKeyChecking=no ${RSYNCUSER}@${_rsyncip} "chmod -R ug+rw ${RSYNCPATH}/."
 		rsync $RSYNC_COPY_ARGUMENTS $IMAGES_FINAL_DIR/installer/* \
 			${RSYNCUSER}@${_rsyncip}:${RSYNCPATH}/installer/
 		if [ -d $IMAGES_FINAL_DIR/virtualization ]; then

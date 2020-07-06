@@ -3,7 +3,9 @@
  * services_dyndns.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -28,14 +30,7 @@
 
 require_once("guiconfig.inc");
 
-if(!is_array($config['dyndnses'])){
-	$config['dyndnses'] = array();
-}
-
-if (!is_array($config['dyndnses']['dyndns'])) {
-	$config['dyndnses']['dyndns'] = array();
-}
-
+init_config_arr(array('dyndnses', 'dyndns'));
 $a_dyndns = &$config['dyndnses']['dyndns'];
 global $dyndns_split_domain_types;
 
@@ -116,7 +111,7 @@ foreach ($a_dyndns as $dyndns):
 <?php
 	$iflist = get_configured_interface_with_descr();
 	foreach ($iflist as $if => $ifdesc) {
-		if ($dyndns['interface'] == $if) {
+		if (str_replace('_stf', '', $dyndns['interface']) == $if) {
 			print($ifdesc);
 
 			break;
@@ -201,6 +196,7 @@ foreach ($a_dyndns as $dyndns):
 								<a class="fa fa-check-square-o" title="<?=gettext('Enable service')?>" href="?act=toggle&amp;id=<?=$i?>" usepost></a>
 <?php }
 ?>
+								<a class="fa fa-clone" title="<?=gettext('Copy service')?>"	href="services_dyndns_edit.php?dup=<?=$i?>"></a>
 								<a class="fa fa-trash" title="<?=gettext('Delete service')?>"	href="services_dyndns.php?act=del&amp;id=<?=$i?>" usepost></a>
 							</td>
 						</tr>

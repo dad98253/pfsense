@@ -3,7 +3,9 @@
  * guiconfig.inc
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -27,12 +29,18 @@
 /* THIS MUST BE ABOVE ALL OTHER CODE */
 header("X-Frame-Options: SAMEORIGIN");
 include_once('phpsessionmanager.inc');
+
+function pfSense_csrf_callback() {
+	include "csrf_error.php";
+}
+
 if (!$nocsrf) {
 	function csrf_startup() {
 		global $config;
 		csrf_conf('rewrite-js', '/csrf/csrf-magic.js');
 		$timeout_minutes = isset($config['system']['webgui']['session_timeout']) ? $config['system']['webgui']['session_timeout'] : 240;
 		csrf_conf('expires', $timeout_minutes * 60);
+		csrf_conf('callback', 'pfSense_csrf_callback');
 	}
 	require_once("csrf/csrf-magic.php");
 	if ($_SERVER['REQUEST_METHOD'] == 'POST') {
@@ -81,19 +89,6 @@ if (!$ignorefirmwarelock) {
 	}
 }
 
-/* Reserved table names to avoid collision */
-$reserved_table_names = array(
-	"bogons",
-	"bogonsv6",
-	"negate_networks",
-	"snort2c",
-	"sshlockout",
-	"tonatsubnets",
-	"virusprot",
-	"vpn_networks",
-	"webConfiguratorlockout"
-);
-
 $firewall_rules_dscp_types = array(
 	"af11",
 	"af12",
@@ -125,9 +120,9 @@ $auth_server_types = array(
 	'radius' => "RADIUS");
 
 $ldap_urltypes = array(
-	'TCP - Standard' => 389,
-	'TCP - STARTTLS' => 389,
-	'SSL - Encrypted' => 636);
+	'Standard TCP' => 389,
+	'STARTTLS Encrypted' => 389,
+	'SSL/TLS Encrypted' => 636);
 
 $ldap_scopes = array(
 	'one' => gettext("One Level"),
@@ -143,19 +138,22 @@ $ldap_templates = array(
 		'desc' => "OpenLDAP",
 		'attr_user' => "cn",
 		'attr_group' => "cn",
-		'attr_member' => "member"),
+		'attr_member' => "member",
+		'allow_unauthenticated' => "true"),
 
 	'msad' => array(
 		'desc' => "Microsoft AD",
 		'attr_user' => "samAccountName",
 		'attr_group' => "cn",
-		'attr_member' => "memberOf"),
+		'attr_member' => "memberOf",
+		'allow_unauthenticated' => "false"),
 
 	'edir' => array(
 		'desc' => "Novell eDirectory",
 		'attr_user' => "cn",
 		'attr_group' => "cn",
-		'attr_member' => "uniqueMember"));
+		'attr_member' => "uniqueMember",
+		'allow_unauthenticated' => "false"));
 
 $radius_srvcs = array(
 	'both' => gettext("Authentication and Accounting"),
@@ -177,8 +175,10 @@ $netbios_nodetypes = array(
 
 /* some well known ports */
 $wkports = array(
+	179 => "BGP",
 	5999 => "CVSup",
 	53 => "DNS",
+	853 => "DNS over TLS",
 	21 => "FTP",
 	3000 => "HBCI",
 	80 => "HTTP",
@@ -191,6 +191,7 @@ $wkports = array(
 	500 => "ISAKMP",
 	1701 => "L2TP",
 	389 => "LDAP",
+	636 => "LDAP/S",
 	1755 => "MMS/TCP",
 	7000 => "MMS/UDP",
 	445 => "MS DS",
@@ -217,6 +218,7 @@ $wkports = array(
 	22 => "SSH",
 	3478 => "STUN",
 	587 => "SUBMISSION",
+	514 => "Syslog",
 	3544 => "Teredo",
 	23 => "Telnet",
 	69 => "TFTP",
@@ -257,9 +259,11 @@ function do_input_validation($postdata, $reqdfields, $reqdfieldsn, &$input_error
 		}
 	}
 
-	for ($i = 0; $i < count($reqdfields); $i++) {
-		if ($postdata[$reqdfields[$i]] == "") {
-			$input_errors[] = sprintf(gettext("The field %s is required."), $reqdfieldsn[$i]);
+	if (is_array($reqdfields)) {
+		for ($i = 0; $i < count($reqdfields); $i++) {
+			if ($postdata[$reqdfields[$i]] == "") {
+				$input_errors[] = sprintf(gettext("The field %s is required."), $reqdfieldsn[$i]);
+			}
 		}
 	}
 }
@@ -450,67 +454,67 @@ function insert_word_breaks_in_domain_name($domain_name) {
 function firewall_check_for_advanced_options(&$item) {
 	$item_set = "";
 	if ($item['os']) {
-			$item_set .= "os {$item['os']} ";
+			$item_set .= "os " . htmlspecialchars($item['os']) . " ";
 	}
 	if ($item['dscp']) {
-		$item_set .= "dscp {$item['dscp']} ";
+		$item_set .= "dscp " . htmlspecialchars($item['dscp']) . " ";
 	}
 	if ($item['max']) {
-		$item_set .= "max {$item['max']} ";
+		$item_set .= "max " . htmlspecialchars($item['max']) . " ";
 	}
 	if ($item['max-src-nodes']) {
-		$item_set .= "max-src-nodes {$item['max-src-nodes']} ";
+		$item_set .= "max-src-nodes " . htmlspecialchars($item['max-src-nodes']) . " ";
 	}
 	if ($item['max-src-conn']) {
-		$item_set .= "max-src-conn {$item['max-src-conn']} ";
+		$item_set .= "max-src-conn " . htmlspecialchars($item['max-src-conn']) . " ";
 	}
 	if ($item['max-src-states']) {
-		$item_set .= "max-src-states {$item['max-src-states']} ";
+		$item_set .= "max-src-states " . htmlspecialchars($item['max-src-states']) . " ";
 	}
 	if (isset($item['nopfsync'])) {
 		$item_set .= "nopfsync ";
 	}
 	if ($item['statetype'] != "keep state" && $item['statetype'] != "") {
-		$item_set .= "statetype {$item['statetype']} ";
+		$item_set .= "statetype " . htmlspecialchars($item['statetype']) . " ";
 	}
 	if ($item['statetimeout']) {
-		$item_set .= "statetimeout {$item['statetimeout']} ";
+		$item_set .= "statetimeout " . htmlspecialchars($item['statetimeout']) . " ";
 	}
 	if (isset($item['nosync'])) {
 		$item_set .= "no XMLRPC Sync ";
 	}
 	if ($item['max-src-conn-rate']) {
-		$item_set .= "max-src-conn-rate {$item['max-src-conn-rate']} ";
+		$item_set .= "max-src-conn-rate " . htmlspecialchars($item['max-src-conn-rate']) . " ";
 	}
 	if ($item['max-src-conn-rates']) {
-		$item_set .= "max-src-conn-rates {$item['max-src-conn-rates']} ";
+		$item_set .= "max-src-conn-rates " . htmlspecialchars($item['max-src-conn-rates']) . " ";
 	}
 	if ($item['vlanprio']) {
-		$item_set .= "vlanprio {$item['vlanprio']} ";
+		$item_set .= "vlanprio " . htmlspecialchars($item['vlanprio']) . " ";
 	}
 	if ($item['vlanprioset']) {
-		$item_set .= "vlanprioset {$item['vlanprioset']} ";
+		$item_set .= "vlanprioset " . htmlspecialchars($item['vlanprioset']) . " ";
 	}
 	if ($item['gateway']) {
-		$item_set .= "gateway {$item['gateway']} ";
+		$item_set .= "gateway " . htmlspecialchars($item['gateway']) . " ";
 	}
 	if ($item['dnpipe']) {
-		$item_set .= "limiter {$item['dnpipe']} ";
+		$item_set .= "limiter " . htmlspecialchars($item['dnpipe']) . " ";
 	}
 	if ($item['pdnpipe']) {
-		$item_set .= "limiter {$item['pdnpipe']} ";
+		$item_set .= "limiter " . htmlspecialchars($item['pdnpipe']) . " ";
 	}
 	if ($item['ackqueue']) {
-		$item_set .= "ackqueue {$item['ackqueue']} ";
+		$item_set .= "ackqueue " . htmlspecialchars($item['ackqueue']) . " ";
 	}
 	if ($item['defaultqueue']) {
-		$item_set .= "defaultqueue {$item['defaultqueue']} ";
+		$item_set .= "defaultqueue " . htmlspecialchars($item['defaultqueue']) . " ";
 	}
 	if ($item['tag']) {
-		$item_set .= "tag {$item['tag']} ";
+		$item_set .= "tag " . htmlspecialchars($item['tag']) . " ";
 	}
 	if ($item['tagged']) {
-		$item_set .= "tagged {$item['tagged']} ";
+		$item_set .= "tagged " . htmlspecialchars($item['tagged']) . " ";
 	}
 	if (isset($item['allowopts'])) {
 		$item_set .= "allowopts ";
@@ -608,130 +612,6 @@ function update_changedesc($update) {
 
 	$changedesc .= " {$update}";
 	$changecount++;
-}
-
-// This version of dump_clog() does not output <td></td> or any other table elements.
-function dump_clog_no_table($logfile, $tail, $withorig = true, $grepfor = "", $grepinvert = "") {
-	global $g, $config;
-	$sor = isset($config['syslog']['reverse']) ? "-r" : "";
-	$specific_log = basename($logfile, '.log') . '_settings';
-	if ($config['syslog'][$specific_log]['cronorder'] == 'forward') $sor = "";
-	if ($config['syslog'][$specific_log]['cronorder'] == 'reverse') $sor = "-r";
-	$logarr = array();
-	$grepline = "  ";
-	if (is_array($grepfor)) {
-		$invert = '';
-		if ((strpos($grepfor[0], '!') === 0)) {
-			$grepfor[0] = substr($grepfor[0], 1);
-			$invert = '-v';
-		}
-		$grepline .= " | /usr/bin/egrep {$invert} " . escapeshellarg(implode("|", $grepfor));
-	}
-	if (is_array($grepinvert)) {
-		$grepline .= " | /usr/bin/egrep -v " . escapeshellarg(implode("|", $grepinvert));
-	}
-	if (is_dir($logfile)) {
-		$logarr = array(sprintf(gettext("File %s is a directory."), $logfile));
-	} elseif (file_exists($logfile) && filesize($logfile) == 0) {
-		$logarr = array(gettext("Log file started."));
-	} else {
-		if ($config['system']['disablesyslogclog']) {
-			exec("cat " . escapeshellarg($logfile) . "{$grepline} | /usr/bin/tail {$sor} -n " . escapeshellarg($tail), $logarr);
-		} else {
-			exec("/usr/local/sbin/clog " . escapeshellarg($logfile) . "{$grepline}| grep -v \"CLOG\" | grep -v \"\033\" | /usr/bin/tail {$sor} -n " . escapeshellarg($tail), $logarr);
-		}
-	}
-	echo "\n";
-
-	$rows = 0;
-	foreach ($logarr as $logent) {
-		$rows++;
-		$logent = preg_split("/\s+/", $logent, 6);
-
-		if ($withorig) {
-				$entry_date_time = htmlspecialchars(join(" ", array_slice($logent, 0, 3)));
-				$entry_text = ($logent[3] ==  $config['system']['hostname']) ? "" : $logent[3] . " ";
-				$entry_text .= htmlspecialchars($logent[4] . " " . $logent[5]);
-				echo "{$entry_date_time}";
-				echo " " . "{$entry_text}"	. "\n";
-		} else {
-				echo htmlspecialchars($logent[5]) . "\n";
-		}
-
-	}
-	return($rows);
-}
-
-function dump_clog($logfile, $tail, $withorig = true, $grepfor = "", $grepinvert = "") {
-	global $g, $config;
-	$sor = isset($config['syslog']['reverse']) ? "-r" : "";
-	$specific_log = basename($logfile, '.log') . '_settings';
-	if ($config['syslog'][$specific_log]['cronorder'] == 'forward') $sor = "";
-	if ($config['syslog'][$specific_log]['cronorder'] == 'reverse') $sor = "-r";
-	$logarr = array();
-	$grepline = "  ";
-	if (is_array($grepfor)) {
-		$invert = '';
-		if ((strpos($grepfor[0], '!') === 0)) {
-			$grepfor[0] = substr($grepfor[0], 1);
-			$invert = '-v';
-		}
-		$grepline .= " | /usr/bin/egrep {$invert} " . escapeshellarg(implode("|", $grepfor));
-	}
-	if (is_array($grepinvert)) {
-		$grepline .= " | /usr/bin/egrep -v " . escapeshellarg(implode("|", $grepinvert));
-	}
-	if (is_dir($logfile)) {
-		$logarr = array(sprintf(gettext("File %s is a directory."), $logfile));
-	} elseif (file_exists($logfile) && filesize($logfile) == 0) {
-		$logarr = array(gettext("Log file started."));
-	} else {
-		if ($config['system']['disablesyslogclog']) {
-			exec("cat " . escapeshellarg($logfile) . "{$grepline} | /usr/bin/tail {$sor} -n " . escapeshellarg($tail), $logarr);
-		} else {
-			exec("/usr/local/sbin/clog " . escapeshellarg($logfile) . "{$grepline}| grep -v \"CLOG\" | grep -v \"\033\" | /usr/bin/tail {$sor} -n " . escapeshellarg($tail), $logarr);
-		}
-	}
-
-	$rows = 0;
-	foreach ($logarr as $logent) {
-		$rows++;
-		$logent = preg_split("/\s+/", $logent, 6);
-		echo "<tr>\n";
-		if ($withorig) {
-			$entry_date_time = htmlspecialchars(join(" ", array_slice($logent, 0, 3)));
-			$entry_text = ($logent[3] == $config['system']['hostname']) ? "" : $logent[3] . " ";
-			$entry_text .= htmlspecialchars($logent[4] . " " . $logent[5]);
-			echo "<td class=\"text-nowrap\">{$entry_date_time}</td>\n";
-			echo "<td style=\"word-wrap:break-word; word-break:break-all; white-space:normal\">{$entry_text}</td>\n";
-		} else {
-				echo "<td>" . htmlspecialchars($logent[5]) . "</td>\n";
-		}
-		echo "</tr>\n";
-	}
-	return($rows);
-}
-
-function return_clog($logfile, $tail, $withorig = true, $grepfor = "", $grepinvert = "", $grepreverse = false) {
-	global $g, $config;
-	$sor = (isset($config['syslog']['reverse']) || $grepreverse) ? "-r" : "";
-	$specific_log = basename($logfile, '.log') . '_settings';
-	if (($config['syslog'][$specific_log]['cronorder'] == 'forward') && !$grepreverse) $sor = "";
-	if (($config['syslog'][$specific_log]['cronorder'] == 'reverse') ||  $grepreverse) $sor = "-r";
-	$logarr = array();
-	$grepline = "  ";
-	if (is_array($grepfor)) {
-		$grepline .= " | /usr/bin/egrep " . escapeshellarg(implode("|", $grepfor));
-	}
-	if (is_array($grepinvert)) {
-		$grepline .= " | /usr/bin/egrep -v " . escapeshellarg(implode("|", $grepinvert));
-	}
-	if ($config['system']['disablesyslogclog']) {
-		exec("cat " . escapeshellarg($logfile) . "{$grepline} | /usr/bin/tail {$sor} -n " . escapeshellarg($tail), $logarr);
-	} else {
-		exec("/usr/local/sbin/clog " . escapeshellarg($logfile) . "{$grepline}| grep -v \"CLOG\" | grep -v \"\033\" | /usr/bin/tail {$sor} -n " . escapeshellarg($tail), $logarr);
-	}
-	return($logarr);
 }
 
 /* Check if variable has changed, update and log if it has
@@ -1191,7 +1071,7 @@ function alias_info_popup($alias_id) {
 		foreach ($alias_addresses as $ap) {
 			$content .= "	<tr>\n";
 			$content .= "		<td>\n";
-			$content .= 			$ap;
+			$content .= 			idn_to_utf8($ap);
 			$content .=	"		</td>\n";
 			$content .= "		<td style='padding-left: 10px;'>\n";
 			$content .= 			htmlspecialchars($alias_details[$idx]);
@@ -1202,6 +1082,82 @@ function alias_info_popup($alias_id) {
 
 		$content .= "</tbody>\n";
 		$content .= "<table>\n";
+	}
+
+	return $content;
+}
+
+function gateway_info_popup($showgw) {
+	global $config, $user_settings;
+
+	init_config_arr(array('gateways', 'gateway_group'));
+	$a_gateways = return_gateways_array();
+	$gateways_status = return_gateways_status(true);
+
+	$content = "";
+	$gws = array();
+	$bgdanger = array('force_down', 'down', 'highloss', 'highdelay');
+	$bgwarning = array('loss', 'delay');
+	$bgsuccess = array('none');
+	$bgcolor = "bg-info";
+
+	if (is_array($a_gateways)) {
+		foreach ($a_gateways as $i => $gateway) {
+			if ($gateway['name'] == $showgw) {
+				$gws[] = $gateway['name'];
+			}
+		}
+	}
+	if (is_array($config['gateways']['gateway_group'])) {
+		foreach($config['gateways']['gateway_group'] as $gwgroup) {
+			if ($gwgroup['name'] == $showgw) {
+				foreach ($gwgroup['item'] as $member) {
+					$membersplit = explode("|", $member);
+					$gateways[] = $membersplit[0];
+				}
+			}
+		}
+	}
+
+	if (!empty($gws)) {
+		$content .= "<table>\n";
+		$content .= "<thead>\n";
+		$content .= "<tr>\n";
+		$content .= "<th>" . gettext("Name") . "</th><th style='padding-left: 10px;'>" . gettext("Interface") . "</th>";
+		$content .= "<th style='padding-left: 10px;'>" . gettext("Gateway") . "</th></tr>\n";
+		$content .= "</thead>\n";
+		$content .= "<tbody>\n";
+		foreach ($gws as $gw) {
+			foreach ($gateways_status as $gwstatus) {
+				if ($gwstatus['name'] == $gw) {
+					if (in_array($gwstatus['status'], $bgdanger)) {
+						$bgcolor = "bg-danger";
+					} elseif (in_array($gwstatus['status'], $bgwarning)) {
+						$bgcolor = "bg-warning";
+					} elseif (in_array($gwstatus['status'], $bgsuccess)) {
+						$bgcolor = "bg-success";
+					} else {
+						$bgcolor = "bg-info";
+					}
+				}
+			}
+			$content .= "	<tr class='{$bgcolor}'>\n";
+			$content .= "		<td>\n";
+			$content .= 			$gw;
+			$content .=	"		</td>\n";
+			$content .= "		<td style='padding-left: 10px;'>\n";
+			$content .= 			$config['interfaces'][lookup_gateway_interface_by_name($gw)]['descr'];
+			$content .=	"		</td>\n";
+			$content .= "		<td style='padding-left: 10px;'>\n";
+			$content .= 			lookup_gateway_ip_by_name($gw);
+			$content .=	"		</td>\n";
+			$content .= "	</tr>\n";
+			$idx++;
+		}
+		$content .= "</tbody>\n";
+		$content .= "<table>\n";
+	} else {
+		return;
 	}
 
 	return $content;
@@ -1294,6 +1250,39 @@ if (isset($config['system']['timezone']) &&
 	$timezone = $g['default_timezone'];
 } else {
 	$timezone = "Etc/UTC";
+}
+
+/* Remove files we do not want to see in a crash report */
+function cleanup_crash_file_list() {
+	$files = glob("/var/crash/*");
+	if (!is_array($files) || empty($files)) {
+		return array();
+	}
+
+	$exclude_patterns = array(
+		'.*.last',
+		'bounds',
+		'minfree'
+	);
+
+	foreach ($files as $idx => $fb) {
+		if (preg_match('/' . implode('|', $exclude_patterns) . '/', basename($fb)) == 1) {
+			unset($files[$idx]);
+		}
+	}
+
+	return $files;
+}
+
+function system_has_crash_data() {
+	/* Test if there are any crash data files present */
+	return count(cleanup_crash_file_list()) > 0;
+}
+
+function system_has_php_errors() {
+	/* Check if the PHP error log is empty. Cast to int in case the file
+	 * does not exist and filesize() returns false. */
+	return (int) @filesize("/tmp/PHP_errors.log") > 0;
 }
 
 date_default_timezone_set($timezone);

@@ -3,7 +3,8 @@
 # rc.php_ini_setup
 #
 # part of pfSense (https://www.pfsense.org)
-# Copyright (c) 2014-2018 Rubicon Communications, LLC (Netgate)
+# Copyright (c) 2014-2016 Electric Sheep Fencing
+# Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
 # All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,32 +21,30 @@
 #
 
 # Set our operating platform
-VERSION=`/bin/cat /etc/version`
+VERSION=$(/bin/cat /etc/version)
 MIN_REALMEM_FOR_OPCACHE=512
 
-if pkg info -e php72; then
-	PHP_VER=7
+if /usr/local/sbin/pkg-static info -e php73; then
+	EXTENSIONSDIR="/usr/local/lib/php/20180731/"
+elif /usr/local/sbin/pkg-static info -e php72; then
 	EXTENSIONSDIR="/usr/local/lib/php/20170718/"
-else
-	PHP_VER=5
-	EXTENSIONSDIR="/usr/local/lib/php/20131226/"
 fi
 
 # Grab amount of memory that is detected
 if [ -f /var/log/dmesg.boot ]; then
-	AVAILMEM=`/bin/cat /var/log/dmesg.boot |/usr/bin/awk '/avail memory/ { memory=($4 / 1048576); printf("%0.0f\n", memory); exit}'`
+	AVAILMEM=$(/bin/cat /var/log/dmesg.boot |/usr/bin/awk '/avail memory/ { memory=($4 / 1048576); printf("%0.0f\n", memory); exit}')
 else
-	AVAILMEM=`/sbin/dmesg -a |/usr/bin/awk '/avail memory/ { memory=($4 / 1048576); printf("%0.0f\n", memory); exit}'`
+	AVAILMEM=$(/sbin/dmesg -a |/usr/bin/awk '/avail memory/ { memory=($4 / 1048576); printf("%0.0f\n", memory); exit}')
 fi
 
 if [ -z "$AVAILMEM" ]; then
-	MEM=`/sbin/sysctl -q hw.physmem | cut -d':' -f2`
-	AVAILMEM=`/bin/expr $MEM / 1048576`
+	MEM=$(/sbin/sysctl -q hw.physmem | cut -d':' -f2)
+	AVAILMEM=$(/bin/expr $MEM / 1048576)
 fi
 
 
 # Get amount of ram installed on this system
-REALMEM=`/sbin/sysctl -q hw.realmem | /usr/bin/awk '{print $2/1048576}' | /usr/bin/awk -F '.' '{print $1}'`
+REALMEM=$(/sbin/sysctl -q hw.realmem | /usr/bin/awk '{print $2/1048576}' | /usr/bin/awk -F '.' '{print $1}')
 export REALMEM
 export LOWMEM
 
@@ -98,10 +97,6 @@ PHPMODULES="$PHPMODULES posix"
 PHPMODULES="$PHPMODULES readline"
 # Login sessions
 PHPMODULES="$PHPMODULES session"
-if [ $PHP_VER -eq 5 ]; then
-	# Extra sanity seatbelts
-	PHPMODULES="$PHPMODULES suhosin"
-fi
 # Firewall rules edit
 PHPMODULES="$PHPMODULES ctype"
 # firewall_rules_edit.php
@@ -149,7 +144,7 @@ PHP_ZEND_MODULES=""
 if [ -f /usr/local/etc/php.ini ]; then
 	/bin/rm /usr/local/etc/php.ini
 fi
-LOADED_MODULES=`/usr/local/bin/php-cgi -m | /usr/bin/grep -v "\["`
+LOADED_MODULES=$(/usr/local/bin/php-cgi -m | /usr/bin/grep -v "\[")
 
 unset TIMEZONE
 # Fetch the timezone from /var/db/zoneinfo if present
@@ -255,24 +250,6 @@ opcache.enabled="0"
 EOF
 fi
 
-if [ $PHP_VER -eq 5 ]; then
-	/bin/cat >>/usr/local/etc/php.ini <<EOF
-
-[suhosin]
-suhosin.get.max_array_index_length = 256
-suhosin.get.max_vars = 5000
-suhosin.get.max_value_length = 500000
-suhosin.post.max_array_index_length = 256
-suhosin.post.max_vars = 5000
-suhosin.post.max_value_length = 500000
-suhosin.request.max_array_index_length = 256
-suhosin.request.max_vars = 5000
-suhosin.request.max_value_length = 500000
-suhosin.memory_limit = 805306368
-
-EOF
-fi
-
 PHPFPMMAX=3
 PHPFPMIDLE=30
 PHPFPMSTART=1
@@ -366,11 +343,11 @@ if [ -f /var/run/php_modules_load_errors.txt ]; then
 fi
 
 for EXT in $PHPMODULES; do
-	PHPMODULESLC="$PHPMODULESLC `echo "$EXT" | /usr/bin/tr '[:upper:]' '[:lower:]'`"
+	PHPMODULESLC="$PHPMODULESLC $(echo "$EXT" | /usr/bin/tr '[:upper:]' '[:lower:]')"
 done
 
 # Check loaded modules and remove anything that did not load correctly
-LOADED_MODULES=`/usr/local/bin/php-cgi -m | /usr/bin/tr '[:upper:]' '[:lower:]' 2>/dev/null | /usr/bin/grep -v "\["`
+LOADED_MODULES=$(/usr/local/bin/php-cgi -m | /usr/bin/tr '[:upper:]' '[:lower:]' 2>/dev/null | /usr/bin/grep -v "\[")
 for EXT in $PHPMODULESLC; do
 	SHOULDREMOVE="true"
 	for LM in $LOADED_MODULES; do

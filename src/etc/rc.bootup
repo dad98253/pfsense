@@ -6,7 +6,9 @@
  * originally based on m0n0wall (http://m0n0.ch/wall)
  * Copyright (c) 2003-2004 Manuel Kasper <mk@neon1.net>.
  * Copyright (c) 2009 Erik Kristensen
- * Copyright (c) 2005-2018 Rubicon Communications, LLC (Netgate). All rights reserved.
+ * Copyright (c) 2005-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -83,11 +85,6 @@ system_check_reset_button();
 /* remove previous firmware upgrade if present */
 if (file_exists("/root/firmware.tgz")) {
 	unlink("/root/firmware.tgz");
-}
-
-/* Reinstall of packages after reboot has been requested */
-if (file_exists("{$g['conf_path']}/needs_package_sync_after_reboot")) {
-	touch("{$g['conf_path']}/needs_package_sync");
 }
 
 /* Triggering of the initial setup wizard after reboot has been requested */
@@ -185,6 +182,9 @@ system_hosts_generate();
 /* configure loopback interface */
 interfaces_loopback_configure();
 
+/* Setup Local CA Trust Store */
+ca_setup_trust_store();
+
 /* start syslogd */
 system_syslogd_start();
 
@@ -201,6 +201,16 @@ echo "done.\n";
 echo "Setting up interfaces microcode...";
 setup_microcode();
 echo "done.\n";
+
+/* pcscd daemon must be started before IPsec */
+echo "Starting PC/SC Smart Card Services...";
+mwexec_bg("/usr/local/sbin/pcscd");
+echo "done.\n";
+
+if (isset($config['system']['mds_disable']) &&
+    (strlen($config['system']['mds_disable']) > 0)) {
+	set_single_sysctl("hw.mds_disable" , (int)$config['system']['mds_disable']);
+}
 
 /* remove leftover dhcp6c lock files if they exist */
 foreach ($config['interfaces'] as $interface) {
@@ -251,13 +261,12 @@ echo "Setting up static routes...";
 system_routing_configure();
 echo "done.\n";
 
-echo "Setting up DNSs...";
+echo "Setting up DNSs...\n";
 /* start dnsmasq service */
 services_dnsmasq_configure();
 
 /* start unbound service */
 services_unbound_configure();
-echo "done.\n";
 
 echo "Synchronizing user settings...";
 local_reset_accounts();
@@ -281,15 +290,10 @@ echo "done.\n";
 system_routing_enable();
 
 /* Enable ntpd */
-echo "Starting NTP time client...";
 system_ntp_configure();
-echo "done.\n";
 
-/* start load balancer daemon */
-relayd_configure();
-
-/* configure console menu and serial port*/
-setup_serial_port();
+/* Configure console (and serial port - if necessary). */
+console_configure();
 
 /* start DHCP service */
 services_dhcpd_configure();
@@ -322,7 +326,7 @@ voucher_configure();
 system_do_shell_commands();
 
 /* start IPsec tunnels */
-$ipsec_dynamic_hosts = vpn_ipsec_configure();
+$ipsec_dynamic_hosts = ipsec_configure();
 
 /* start SNMP service */
 services_snmpd_configure();
@@ -354,6 +358,11 @@ if ($physmem < $g['minimum_ram_warning']) {
 	));
 }
 
+if (file_exists("/conf/ram_disks_failed")) {
+	require_once("/etc/inc/notices.inc");
+	file_notice("RAM Disks", "RAM disk creation failed. Reverted to traditional storage. Check RAM disk sizes.", "RAM Disks");
+}
+
 /* if we are operating at 1000 then increase timeouts.
    this was never accounted for after moving to 1000 hz */
 $kern_hz = get_single_sysctl('kern.clockrate');
@@ -377,19 +386,11 @@ prefer_ipv4_or_ipv6();
 
 /* Resync / Reinstall packages if need be */
 if (file_exists("{$g['conf_path']}/needs_package_sync")) {
-	mark_subsystem_dirty('packagelock');
-	if (package_reinstall_all()) {
-		@unlink("{$g['conf_path']}/needs_package_sync");
-	}
-	clear_subsystem_dirty('packagelock');
-}
-
-/* Detect installed binary pkgs that are not registered in the system */
-register_all_installed_packages();
-
-/* Now we used this file, delete it */
-if (file_exists("{$g['conf_path']}/needs_package_sync_after_reboot")) {
-	@unlink("{$g['conf_path']}/needs_package_sync_after_reboot");
+	echo "Triggering packages reinstallation in background\n";
+	mwexec_bg("{$g['etc_path']}/rc.package_reinstall_all");
+} else {
+	/* Detect installed binary pkgs that are not registered in the system */
+	register_all_installed_packages();
 }
 
 /* Give syslogd a kick after everything else has been initialized, otherwise it can occasionally
@@ -402,7 +403,7 @@ unset($g['booting']);
 
 /* If there are ipsec dynamic hosts try again to reload the tunnels as rc.newipsecdns does */
 if ($ipsec_dynamic_hosts) {
-	vpn_ipsec_configure();
+	ipsec_configure();
 }
 if ($ipsec_dynamic_hosts || !empty($filterdns)) {
 	filter_configure();

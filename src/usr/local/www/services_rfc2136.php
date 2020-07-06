@@ -3,7 +3,9 @@
  * services_rfc2136.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -28,14 +30,7 @@
 
 require_once("guiconfig.inc");
 
-if (!is_array($config['dnsupdates'])) {
-	$config['dnsupdates'] = array();
-}
-
-if (!is_array($config['dnsupdates']['dnsupdate'])) {
-	$config['dnsupdates']['dnsupdate'] = array();
-}
-
+init_config_arr(array('dnsupdates', 'dnsupdate'));
 $a_rfc2136 = &$config['dnsupdates']['dnsupdate'];
 
 if ($_POST['act'] == "del") {
@@ -187,6 +182,7 @@ foreach ($a_rfc2136 as $rfc2136):
 						<a class="fa fa-check-square-o" title="<?=gettext('Enable client')?>" href="?act=toggle&amp;id=<?=$i?>" usepost></a>
 					<?php }
 					?>
+						<a class="fa fa-clone" title="<?=gettext('Copy client')?>" href="services_rfc2136_edit.php?dup=<?=$i?>"></a>
 						<a class="fa fa-trash" title="<?=gettext('Delete client')?>" href="services_rfc2136.php?act=del&amp;id=<?=$i?>" usepost></a>
 					</td>
 					</tr>

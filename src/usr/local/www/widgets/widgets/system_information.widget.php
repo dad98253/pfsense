@@ -3,7 +3,9 @@
  * system_information.widget.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2007 Scott Dale
  * All rights reserved.
  *
@@ -32,11 +34,14 @@ include_once("includes/functions.inc.php");
 
 $sysinfo_items = array(
 	'name' => gettext('Name'),
+	'user' => gettext('User'),
 	'system' => gettext('System'),
 	'bios' => gettext('BIOS'),
 	'version' => gettext('Version'),
 	'cpu_type' => gettext('CPU Type'),
 	'hwcrypto' => gettext('Hardware Crypto'),
+	'pti' => gettext('Kernel PTI'),
+	'mds' => gettext('MDS Mitigation'),
 	'uptime' => gettext('Uptime'),
 	'current_datetime' => gettext('Current Date/Time'),
 	'dns_servers' => gettext('DNS Server(s)'),
@@ -155,6 +160,14 @@ $temp_use_f = (isset($user_settings['widgets']['thermal_sensors-0']) && !empty($
 		</tr>
 <?php
 	endif;
+	if (!in_array('user', $skipsysinfoitems)):
+		$rows_displayed = true;
+?>
+		<tr>
+			<th><?=gettext("User");?></th>
+			<td><?php echo htmlspecialchars(get_config_user()); ?></td>
+<?php
+	endif;
 	if (!in_array('system', $skipsysinfoitems)):
 		$rows_displayed = true;
 ?>
@@ -270,14 +283,25 @@ $temp_use_f = (isset($user_settings['widgets']['thermal_sensors-0']) && !empty($
 <?php
 	endif;
 	$pti = get_single_sysctl('vm.pmap.pti');
-	if (strlen($pti) > 0) {
+	if ((strlen($pti) > 0) && !in_array('pti', $skipsysinfoitems)):
+		$rows_displayed = true;
 ?>
 		<tr>
 			<th><?=gettext("Kernel PTI");?></th>
 			<td><?=($pti == 0) ? gettext("Disabled") : gettext("Enabled");?></td>
 		</tr>
 <?php
-	}
+	endif;
+	$mds = get_single_sysctl('hw.mds_disable_state');
+	if ((strlen($mds) > 0) && !in_array('mds', $skipsysinfoitems)):
+		$rows_displayed = true;
+?>
+		<tr>
+			<th><?=gettext("MDS Mitigation");?></th>
+			<td><?=ucwords(htmlspecialchars($mds));?></td>
+		</tr>
+<?php
+	endif;
 	if (!in_array('uptime', $skipsysinfoitems)):
 		$rows_displayed = true;
 ?>

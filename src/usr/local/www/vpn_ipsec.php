@@ -3,7 +3,9 @@
  * vpn_ipsec.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -37,24 +39,15 @@ require_once("shaper.inc");
 require_once("ipsec.inc");
 require_once("vpn.inc");
 
-if(!is_array($config['ipsec'])){
-	$config['ipsec'] = array();
-}
-
-if (!is_array($config['ipsec']['phase1'])) {
-	$config['ipsec']['phase1'] = array();
-}
-
-if (!is_array($config['ipsec']['phase2'])) {
-	$config['ipsec']['phase2'] = array();
-}
-
+init_config_arr(array('ipsec', 'phase1'));
+init_config_arr(array('ipsec', 'phase2'));
 $a_phase1 = &$config['ipsec']['phase1'];
 $a_phase2 = &$config['ipsec']['phase2'];
 
 
 if ($_POST['apply']) {
-	$ipsec_dynamic_hosts = vpn_ipsec_configure();
+	$ipsec_dynamic_hosts = ipsec_configure();
+	ipsec_reload_package_hook();
 	/* reload the filter in the background */
 	$retval = 0;
 	$retval |= filter_configure();
@@ -77,7 +70,7 @@ if ($_POST['apply']) {
 	/* delete selected p2 entries */
 	if (is_array($_POST['p2entry']) && count($_POST['p2entry'])) {
 		foreach ($_POST['p2entry'] as $p2entrydel) {
-			if (is_interface_ipsec_vti_assigned($a_phase2[$p2entrydel])) {
+			if (is_interface_ipsec_vti_assigned($a_phase2[$p2entrydel]) && ($a_phase2[$p2entrydel]['mode'] == 'vti')) {
 				$input_errors[] = gettext("Cannot delete a VTI Phase 2 while the interface is assigned. Remove the interface assignment before deleting this P2.");
 			} else {
 				unset($a_phase2[$p2entrydel]);
@@ -186,7 +179,7 @@ if ($_POST['apply']) {
 		if (isset($a_phase1[$togglebtn]['disabled'])) {
 			unset($a_phase1[$togglebtn]['disabled']);
 		} else {
-			if (ipsec_vti($a_phase1[$togglebtn])) {
+			if (ipsec_vti($a_phase1[$togglebtn], false, false)) {
 				$input_errors[] = gettext("Cannot disable a Phase 1 with a child Phase 2 while the interface is assigned. Remove the interface assignment before disabling this P2.");
 			} else {
 				$a_phase1[$togglebtn]['disabled'] = true;
@@ -196,7 +189,7 @@ if ($_POST['apply']) {
 		if (isset($a_phase2[$togglebtnp2]['disabled'])) {
 			unset($a_phase2[$togglebtnp2]['disabled']);
 		} else {
-			if (is_interface_ipsec_vti_assigned($a_phase2[$togglebtnp2])) {
+			if (is_interface_ipsec_vti_assigned($a_phase2[$togglebtnp2]) && ($a_phase2[$togglebtnp2]['mode'] == 'vti')) {
 				$input_errors[] = gettext("Cannot disable a VTI Phase 2 while the interface is assigned. Remove the interface assignment before disabling this P2.");
 			} else {
 				$a_phase2[$togglebtnp2]['disabled'] = true;
@@ -205,7 +198,8 @@ if ($_POST['apply']) {
 	} else if (isset($delbtn)) {
 		/* remove static route if interface is not WAN */
 		if ($a_phase1[$delbtn]['interface'] <> "wan") {
-			mwexec("/sbin/route delete -host {$a_phase1[$delbtn]['remote-gateway']}");
+			$rgateway = exec("/sbin/route -n get {$a_phase1[$delbtn]['remote-gateway']} | /usr/bin/awk '/gateway:/ {print $2;}'");
+			mwexec("/sbin/route delete -host {$a_phase1[$delbtn]['remote-gateway']} " . escapeshellarg($rgateway));
 		}
 
 		/* remove all phase2 entries that match the ikeid */
@@ -232,7 +226,7 @@ if ($_POST['apply']) {
 		}
 
 	} else if (isset($delbtnp2)) {
-		if (is_interface_ipsec_vti_assigned($a_phase2[$delbtnp2])) {
+		if (is_interface_ipsec_vti_assigned($a_phase2[$delbtnp2]) && ($a_phase2[$delbtnp2]['mode'] == 'vti')) {
 			$input_errors[] = gettext("Cannot delete a VTI Phase 2 while the interface is assigned. Remove the interface assignment before deleting this P2.");
 		} else {
 			unset($a_phase2[$delbtnp2]);
@@ -396,6 +390,9 @@ $i = 0; foreach ($a_phase1 as $ph1ent):
 							echo "<br/>";
 						}
 						echo $p1_halgos[$p1algo['hash-algorithm']];
+						if (isset($ph1ent['prfselect_enable'])) {
+							echo " / PRF" . $p1_halgos[$p1algo['prf-algorithm']];
+						}
 						$first = false;
 					}
 				}

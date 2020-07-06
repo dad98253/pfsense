@@ -3,7 +3,9 @@
  * services_igmpproxy_edit.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -35,15 +37,9 @@ $pglinks = array("", "services_igmpproxy.php", "@self");
 
 require_once("guiconfig.inc");
 
-if (!is_array($config['igmpproxy'])) {
-	$config['igmpproxy'] = array();
-}
-
-if (!is_array($config['igmpproxy']['igmpentry'])) {
-	$config['igmpproxy']['igmpentry'] = array();
-}
-
 //igmpproxy_sort();
+
+init_config_arr(array('igmpproxy', 'igmpentry'));
 $a_igmpproxy = &$config['igmpproxy']['igmpentry'];
 
 if (is_numericint($_REQUEST['id'])) {
@@ -74,6 +70,11 @@ if ($_POST['save']) {
 		}
 	}
 
+	if (!empty($_POST['threshold']) && (!is_numeric($_POST['threshold']) ||
+	    ($_POST['threshold'] < -1) || ($_POST['threshold'] > 256))) {
+		$input_errors[] = gettext("Threshold value should be between -1 and 256.");
+	} 
+
 	$igmpentry = array();
 	$igmpentry['ifname'] = $_POST['ifname'];
 	$igmpentry['threshold'] = $_POST['threshold'];
@@ -89,9 +90,14 @@ if ($_POST['save']) {
 			$address .= " ";
 		}
 
-		$address .= $_POST["address{$x}"];
-		$address .= "/" . $_POST["address_subnet{$x}"];
-		$isfirst++;
+		$this_addr =  $_POST["address{$x}"] . "/" . $_POST["address_subnet{$x}"];
+		if (is_subnetv4($this_addr)) {
+			$address .= $this_addr;
+			$isfirst++;
+		} else {
+			$input_errors[] = sprintf(gettext("The following submitted address is invalid: %s"), $this_addr);
+		}
+
 		$x++;
 	}
 
@@ -185,7 +191,7 @@ $section->addInput(new Form_Input(
 			'This setting is optional, and by default the threshold is 1.');
 
 if (isset($id) && $a_igmpproxy[$id]) {
-		$section->addInput(new Form_Input(
+		$form->addGlobal(new Form_Input(
 		'id',
 		null,
 		'hidden',
@@ -226,7 +232,7 @@ foreach ($item as $ww) {
 		null,
 		$address,
 		['placeholder' => 'Address']
-	))->sethelp($tracker == $rows ? 'Network/CIDR':null)->addMask('address_subnet' . $tracker, $address_subnet)->setWidth(4)->setPattern('[a-zA-Z0-9_.:]+');
+	))->sethelp($tracker == $rows ? 'Network/CIDR':null)->addMask('address_subnet' . $tracker, $address_subnet, 32)->setWidth(4);
 
 	$group->add(new Form_Button(
 		'deleterow' . $counter,

@@ -6,7 +6,9 @@
  * Copyright (c) 2003-2006 Manuel Kasper <mk@neon1.net>
  * Copyright (c) 2005-2006 Bill Marquette <bill.marquette@gmail.com>
  * Copyright (c) 2006 Paul Taylor <paultaylor@winn-dixie.com>
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -41,7 +43,8 @@ if (function_exists("display_error_form")) {
 	 * lockout table before processing a request */
 
 	/* Fetch the contents of the lockout table. */
-	exec("/sbin/pfctl -t 'webConfiguratorlockout' -T show", $entries);
+	$entries = array();
+	exec("/sbin/pfctl -t 'sshguard' -T show", $entries);
 
 	/* If the client is in the lockout table, print an error, kill states, and exit */
 	if (in_array($_SERVER['REMOTE_ADDR'], array_map('trim', $entries))) {
@@ -211,6 +214,22 @@ if (function_exists("display_error_form") && !isset($config['system']['webgui'][
 					$found_host = true;
 				}
 			}
+
+			/* Fall back to probing active interface addresses rather than config.xml to allow
+			 * changed addresses that have not yet been applied.
+			 * See https://redmine.pfsense.org/issues/8822
+			 */
+			if (!$found_host) {
+				$refifs = get_interface_arr();
+				foreach ($refifs as $rif) {
+					if (($referrer_host == find_interface_ip($rif)) ||
+					    ($referrer_host == find_interface_ipv6($rif)) ||
+					    ($referrer_host == find_interface_ipv6_ll($rif))) {
+						$found_host = true;
+						break;
+					}
+				}
+			}
 		}
 		if ($found_host == false) {
 			if (!security_checks_disabled()) {
@@ -353,12 +372,16 @@ function get_user_privileges(& $user) {
 		$allowed_groups = local_user_get_groups($user, true);
 	}
 
-	if (is_array($allowed_groups)) {
-		foreach ($allowed_groups as $name) {
-			$group = getGroupEntry($name);
-			if (is_array($group['priv'])) {
-				$privs = array_merge($privs, $group['priv']);
-			}
+	if (!is_array($allowed_groups)) {
+		$allowed_groups = array('all');
+	} else {
+		$allowed_groups[] = 'all';
+	}
+
+	foreach ($allowed_groups as $name) {
+		$group = getGroupEntry($name);
+		if (is_array($group['priv'])) {
+			$privs = array_merge($privs, $group['priv']);
 		}
 	}
 
@@ -366,6 +389,7 @@ function get_user_privileges(& $user) {
 }
 
 function userHasPrivilege($userent, $privid = false) {
+	global $config;
 
 	if (!$privid || !is_array($userent)) {
 		return false;
@@ -378,6 +402,18 @@ function userHasPrivilege($userent, $privid = false) {
 	}
 
 	if (!in_array($privid, $privs)) {
+		return false;
+	}
+
+	/* If someone is in admins group or is admin, do not honor the
+	 * user-config-readonly privilege to prevent foot-shooting due to a
+	 * bad privilege config.
+	 * https://redmine.pfsense.org/issues/10492 */
+	$userGroups = getUserGroups($userent['name'],
+			auth_get_authserver($config['system']['webgui']['authmode']),
+			$_SESSION['user_radius_attributes']);
+	if (($privid == 'user-config-readonly') &&
+	    (($userent['uid'] === "0") || (in_array('admins', $userGroups)))) {
 		return false;
 	}
 
@@ -426,7 +462,9 @@ function local_sync_accounts($u2add, $u2del, $g2add, $g2del) {
 	}
 
 	foreach($u2del as $user) {
-		if ($user['uid'] < 2000 || $user['uid'] > 65000) {
+		if ($user['uid'] > 65000) {
+			continue;
+		} else if ($user['uid'] < 2000 && !in_array($user, $u2add)) {
 			continue;
 		}
 
@@ -753,9 +791,15 @@ function local_user_del($user) {
 }
 
 function local_user_set_password(&$user, $password) {
+	global $config;
+
 	unset($user['password']);
 	unset($user['md5-hash']);
 	$user['bcrypt-hash'] = password_hash($password, PASSWORD_BCRYPT);
+	if (($user['name'] == $config['hasync']['username']) &&
+	    ($config['hasync']['adminsync'] == 'on')) {
+		$config['hasync']['new_password'] = $password;
+	}
 }
 
 function local_user_get_groups($user, $all = false) {
@@ -809,7 +853,7 @@ function local_user_set_groups($user, $new_groups = NULL) {
 		if ($groupname == '' || in_array($groupname, $cur_groups)) {
 			continue;
 		}
-		$group = & $config['system']['group'][$groupindex[$groupname]];
+		$group = &$config['system']['group'][$groupindex[$groupname]];
 		$group['member'][] = $user['uid'];
 		$mod_groups[] = $group;
 
@@ -831,7 +875,7 @@ function local_user_set_groups($user, $new_groups = NULL) {
 		if (!isset($config['system']['group'][$groupindex[$groupname]])) {
 			continue;
 		}
-		$group = & $config['system']['group'][$groupindex[$groupname]];
+		$group = &$config['system']['group'][$groupindex[$groupname]];
 		if (is_array($group['member'])) {
 			$index = array_search($user['uid'], $group['member']);
 			array_splice($group['member'], $index, 1);
@@ -939,7 +983,7 @@ function ldap_test_connection($authcfg) {
 	}
 
 	/* Setup CA environment if needed. */
-	ldap_setup_caenv($authcfg);
+	ldap_setup_caenv($ldap, $authcfg);
 
 	/* connect and see if server is up */
 	$error = false;
@@ -955,7 +999,7 @@ function ldap_test_connection($authcfg) {
 	return true;
 }
 
-function ldap_setup_caenv($authcfg) {
+function ldap_setup_caenv($ldap, $authcfg) {
 	global $g;
 	require_once("certs.inc");
 
@@ -977,14 +1021,13 @@ function ldap_setup_caenv($authcfg) {
 			putenv('LDAPTLS_REQCERT=hard');
 			return;
 		}
-		if (!is_dir("{$g['varrun_path']}/certs")) {
-			@mkdir("{$g['varrun_path']}/certs");
-		}
-		if (file_exists("{$g['varrun_path']}/certs/{$caref['refid']}.ca")) {
-			@unlink("{$g['varrun_path']}/certs/{$caref['refid']}.ca");
-		}
-		file_put_contents("{$g['varrun_path']}/certs/{$caref['refid']}.ca", $cachain);
-		@chmod("{$g['varrun_path']}/certs/{$caref['refid']}.ca", 0600);
+
+		$cert_path = "{$g['varrun_path']}/certs";
+		safe_mkdir($cert_path);
+		unlink_if_exists("{$cert_path}/{$caref['refid']}.ca");
+		file_put_contents("{$cert_path}/{$caref['refid']}.ca", $cachain);
+		@chmod("{$cert_path}/{$caref['refid']}.ca", 0600);
+
 		putenv('LDAPTLS_REQCERT=hard');
 		/* XXX: Probably even the hashed link should be created for this? */
 		putenv("LDAPTLS_CACERTDIR={$g['varrun_path']}/certs");
@@ -1026,7 +1069,7 @@ function ldap_test_bind($authcfg) {
 	}
 
 	/* Setup CA environment if needed. */
-	ldap_setup_caenv($authcfg);
+	ldap_setup_caenv($ldap, $authcfg);
 
 	/* connect and see if server is up */
 	$error = false;
@@ -1114,7 +1157,7 @@ function ldap_get_user_ous($show_complete_ou=true, $authcfg) {
 	}
 
 	/* Setup CA environment if needed. */
-	ldap_setup_caenv($authcfg);
+	ldap_setup_caenv($ldap, $authcfg);
 
 	/* connect and see if server is up */
 	$error = false;
@@ -1228,11 +1271,6 @@ function ldap_get_groups($username, $authcfg) {
 		$ldapauthcont = $authcfg['ldap_authcn'];
 		$ldapnameattribute = strtolower($authcfg['ldap_attr_user']);
 		$ldapgroupattribute = strtolower($authcfg['ldap_attr_member']);
-		if (isset($authcfg['ldap_rfc2307'])) {
-			$ldapfilter         = "(&(objectClass={$authcfg['ldap_attr_groupobj']})({$ldapgroupattribute}={$username}))";
-		} else {
-			$ldapfilter         = "({$ldapnameattribute}={$username})";
-		}
 		$ldaptype = "";
 		$ldapver = $authcfg['ldap_protver'];
 		if (empty($ldapbindun) || empty($ldapbindpw)) {
@@ -1259,7 +1297,7 @@ function ldap_get_groups($username, $authcfg) {
 	$memberof = array();
 
 	/* Setup CA environment if needed. */
-	ldap_setup_caenv($authcfg);
+	ldap_setup_caenv($ldap, $authcfg);
 
 	/* connect and see if server is up */
 	$error = false;
@@ -1311,7 +1349,29 @@ function ldap_get_groups($username, $authcfg) {
 		$ldapfunc = "ldap_search";
 	}
 
-	$search = @$ldapfunc($ldap, $ldapdn, $ldapfilter, array($ldapgroupattribute));
+	if (isset($authcfg['ldap_rfc2307'])) {
+		if (isset($authcfg['ldap_rfc2307_userdn'])) {
+			$ldac_splits = explode(";", $ldapauthcont);
+			foreach ($ldac_splits as $i => $ldac_split) {
+				$ldac_split = isset($authcfg['ldap_utf8']) ? utf8_encode($ldac_split) : $ldac_split;
+				$ldapsearchbasedn = isset($authcfg['ldap_utf8']) ? utf8_encode("{$ldac_split},{$ldapbasedn}") : "{$ldac_split},{$ldapbasedn}";
+				$ldapfilter = "({$ldapnameattribute}={$username})";
+				if (stristr($ldac_split, "DC=") || empty($ldapbasedn)) {
+					$ldapdn = $ldac_split;
+				} else {
+					$ldapdn = $ldapsearchbasedn;
+				}
+				$usersearch = @$ldapfunc($ldap, $ldapdn, $ldapfilter);
+				$userinfo = @ldap_get_entries($ldap, $usersearch);
+			}
+			$username = $userinfo[0]['dn'];
+		}
+		$ldapgroupfilter         = "(&(objectClass={$authcfg['ldap_attr_groupobj']})({$ldapgroupattribute}={$username}))";
+	} else {
+		$ldapgroupfilter         = "({$ldapnameattribute}={$username})";
+	}
+
+	$search = @$ldapfunc($ldap, $ldapdn, $ldapgroupfilter, array($ldapgroupattribute));
 	$info = @ldap_get_entries($ldap, $search);
 
 	$gresults = isset($authcfg['ldap_rfc2307']) ? $info : $info[0][$ldapgroupattribute];
@@ -1341,15 +1401,23 @@ function ldap_format_host($host) {
 	return is_ipaddrv6($host) ? "[$host]" : $host ;
 }
 
-function ldap_backed($username, $passwd, $authcfg) {
+function ldap_backed($username, $passwd, $authcfg, &$attributes = array()) {
 	global $debug, $config;
 
 	if (!$username) {
-		return;
+		$attributes['error_message'] = gettext("Invalid Login.");
+		return false;
+	}
+
+	if (!isset($authcfg['ldap_allow_unauthenticated']) && $passwd == '') {
+		$attributes['error_message'] = gettext("Invalid credentials.");
+		return false;
 	}
 
 	if (!function_exists("ldap_connect")) {
-		return;
+		log_error(gettext("ERROR! unable to find ldap_connect() function."));
+		$attributes['error_message'] = gettext("Internal error during authentication.");
+		return null;
 	}
 
 	if (!isset($authcfg['ldap_nostrip_at']) && stristr($username, "@")) {
@@ -1384,13 +1452,19 @@ function ldap_backed($username, $passwd, $authcfg) {
 		}
 		$ldapauthcont = $authcfg['ldap_authcn'];
 		$ldapnameattribute = strtolower($authcfg['ldap_attr_user']);
+		$ldapgroupattribute = $authcfg['ldap_attr_member'];
 		$ldapextendedqueryenabled = $authcfg['ldap_extended_enabled'];
 		$ldapextendedquery = $authcfg['ldap_extended_query'];
 		$ldapfilter = "";
 		if (!$ldapextendedqueryenabled) {
 			$ldapfilter = "({$ldapnameattribute}={$username})";
 		} else {
-			$ldapfilter = "(&({$ldapnameattribute}={$username})({$ldapextendedquery}))";
+			if (isset($authcfg['ldap_rfc2307'])) {
+				$ldapfilter = "({$ldapnameattribute}={$username})";
+				$ldapgroupfilter = "(&({$ldapgroupattribute}={$username})({$ldapextendedquery}))";
+			} else {
+				$ldapfilter = "(&({$ldapnameattribute}={$username})({$ldapextendedquery}))";
+			}
 		}
 		$ldaptype = "";
 		$ldapver = $authcfg['ldap_protver'];
@@ -1398,23 +1472,18 @@ function ldap_backed($username, $passwd, $authcfg) {
 		$ldapscope = $authcfg['ldap_scope'];
 		$ldaptimeout = is_numeric($authcfg['ldap_timeout']) ? $authcfg['ldap_timeout'] : 5;
 	} else {
-		return false;
+		return null;
 	}
 
 	/* first check if there is even an LDAP server populated */
 	if (!$ldapserver) {
-		if ($ldapfallback) {
-			log_error(gettext("ERROR! ldap_backed() called with no LDAP authentication server defined.  Defaulting to local user database. Visit System -> User Manager."));
-			return local_backed($username, $passwd);
-		} else {
-			log_error(gettext("ERROR! ldap_backed() called with no LDAP authentication server defined."));
-		}
-
-		return false;
+		log_error(gettext("ERROR! could not find details of the LDAP server used for authentication."));
+		$attributes['error_message'] =  gettext("Internal error during authentication.");
+		return null;
 	}
 
 	/* Setup CA environment if needed. */
-	ldap_setup_caenv($authcfg);
+	ldap_setup_caenv($ldap, $authcfg);
 
 	/* Make sure we can connect to LDAP */
 	$error = false;
@@ -1430,15 +1499,17 @@ function ldap_backed($username, $passwd, $authcfg) {
 
 	if (strstr($authcfg['ldap_urltype'], "STARTTLS")) {
 		if (!(@ldap_start_tls($ldap))) {
-			log_error(sprintf(gettext("ERROR! ldap_backed() could not STARTTLS to server %s."), $ldapname));
+			log_error(sprintf(gettext("ERROR! could not connect to LDAP server %s using STARTTLS."), $ldapname));
+			$attributes['error_message'] = gettext("Error : could not connect to authentication server.");
 			@ldap_close($ldap);
-			return false;
+			return null;
 		}
 	}
 
 	if ($error == true) {
-		log_error(sprintf(gettext("ERROR!  Could not connect to server %s."), $ldapname));
-		return false;
+		$errormsg = sprintf(gettext("ERROR! Could not connect to server %s."), $ldapname);
+		$attributes['error_message'] = gettext("Error : could not connect to authentication server.");
+		return null;
 	}
 
 	/* ok, its up.  now, lets bind as the bind user so we can search it */
@@ -1455,8 +1526,9 @@ function ldap_backed($username, $passwd, $authcfg) {
 
 	if ($error == true) {
 		@ldap_close($ldap);
-		log_error(sprintf(gettext("ERROR! Could not bind to server %s."), $ldapname));
-		return false;
+		log_error(sprintf(gettext("ERROR! Could not bind to LDAP server %s. Please check the bind credentials."), $ldapname));
+		$attributes['error_message'] = gettext("Error : could not connect to authentication server.");
+		return null;
 	}
 
 	/* Get LDAP Authcontainers and split em up. */
@@ -1491,15 +1563,37 @@ function ldap_backed($username, $passwd, $authcfg) {
 		}
 		/* Support legacy auth container specification. */
 		if (stristr($ldac_split, "DC=") || empty($ldapbasedn)) {
-			$search = @$ldapfunc($ldap, $ldac_split, $ldapfilter);
+			$ldapdn = $ldac_split;
 		} else {
-			$search = @$ldapfunc($ldap, $ldapsearchbasedn, $ldapfilter);
+			$ldapdn = $ldapsearchbasedn;
+		}
+		$search = @$ldapfunc($ldap, $ldapdn, $ldapfilter);
+		$info = ldap_get_entries($ldap, $search);
+		if (isset($authcfg['ldap_rfc2307'])) {
+			if (isset($authcfg['ldap_rfc2307_userdn'])) {
+				$username = $info[0]['dn'];
+			}
+			$ldapgroupfilter = "(&({$ldapgroupattribute}={$username})({$ldapextendedquery}))";
+		}
+
+		if (isset($ldapgroupfilter)) {
+			$groupsearch = @$ldapfunc($ldap, $ldapdn, $ldapgroupfilter);
+		}
+
+		if (isset($ldapgroupfilter) && !$groupsearch) {
+			log_error(sprintf(gettext("Extended group search resulted in error: %s"), ldap_error($ldap)));
+			continue;
 		}
 		if (!$search) {
 			log_error(sprintf(gettext("Search resulted in error: %s"), ldap_error($ldap)));
 			continue;
 		}
-		$info = ldap_get_entries($ldap, $search);
+		if (isset($groupsearch)) {
+			$validgroup = ldap_count_entries($ldap, $groupsearch);
+			if ($debug) {
+				log_auth(sprintf(gettext("LDAP group search: %s results."), $validgroup));
+			}
+		}
 		$matches = $info['count'];
 		if ($matches == 1) {
 			$userdn = $_SESSION['ldapdn'] = $info[0]['dn'];
@@ -1512,14 +1606,23 @@ function ldap_backed($username, $passwd, $authcfg) {
 
 	if ($usercount != 1) {
 		@ldap_unbind($ldap);
-		log_error(gettext("ERROR! Either LDAP search failed, or multiple users were found."));
+		if ($debug) {
+			if ($usercount === 0) {
+				log_error(sprintf(gettext("ERROR! LDAP search failed, no user matching %s was found."), $username));
+			} else {
+				log_error(sprintf(gettext("ERROR! LDAP search failed, multiple users matching %s were found."), $username));
+			}
+		}
+		$attributes['error_message'] = gettext("Invalid login specified.");
 		return false;
 	}
 
 	/* Now lets bind as the user we found */
 	$passwd = isset($authcfg['ldap_utf8']) ? utf8_encode($passwd) : $passwd;
 	if (!($res = @ldap_bind($ldap, $userdn, $passwd))) {
-		log_error(sprintf(gettext('ERROR! Could not login to server %1$s as user %2$s: %3$s'), $ldapname, $username, ldap_error($ldap)));
+		if ($debug) {
+			log_error(sprintf(gettext('ERROR! Could not login to server %1$s as user %2$s: %3$s'), $ldapname, $username, ldap_error($ldap)));
+		}
 		@ldap_unbind($ldap);
 		return false;
 	}
@@ -1529,8 +1632,16 @@ function ldap_backed($username, $passwd, $authcfg) {
 		log_auth(sprintf(gettext('Logged in successfully as %1$s via LDAP server %2$s with DN = %3$s.'), $username, $ldapname, $userdn));
 	}
 
+	if ($debug && isset($ldapgroupfilter) && $validgroup < 1) {
+		log_auth(sprintf(gettext('Logged in successfully as %1$s but did not match any field in extended query.'), $username));
+	}
+
 	/* At this point we are bound to LDAP so the user was auth'd okay. Close connection. */
 	@ldap_unbind($ldap);
+
+	if (isset($ldapgroupfilter) && $validgroup < 1) {
+		return false;
+	}
 
 	return true;
 }
@@ -1554,7 +1665,9 @@ function radius_backed($username, $password, $authcfg, &$attributes = array()) {
 			$radius_protocol = 'PAP';
 		}
 	} else {
-		return false;
+		log_error(gettext("ERROR! could not find details of the RADIUS server used for authentication."));
+		$attributes['error_message'] =  gettext("Internal error during authentication.");
+		return null;
 	}
 
 	// Create our instance
@@ -1598,10 +1711,43 @@ function radius_backed($username, $password, $authcfg, &$attributes = array()) {
 	}
 
 	if (PEAR::isError($rauth->start())) {
-		$retvalue['auth_val'] = 1;
-		$retvalue['error'] = $rauth->getError();
-		if ($debug) {
-			printf(gettext("RADIUS start: %s") . "<br />\n", $retvalue['error']);
+		$ret = null;
+		log_error(sprintf(gettext("Error during RADIUS authentication : %s"), $rauth->getError()));
+		$attributes['error_message'] = gettext("Error : could not connect to authentication server.");
+	} else {
+		$nasid = $attributes['nas_identifier'];
+		$nasip = $authcfg['radius_nasip_attribute'];
+		if (empty($nasid)) {
+			$nasid = gethostname(); //If no RADIUS NAS-Identifier is given : we use pfsense's hostname as NAS-Identifier
+		}
+		if (!is_ipaddr($nasip)) {
+			$nasip = get_interface_ip($nasip);
+
+			if (!is_ipaddr($nasip)) {
+				$nasip = get_interface_ip();//We use wan interface IP as fallback for NAS-IP-Address
+			}
+		}
+		$nasmac = get_interface_mac(find_ip_interface($nasip));
+
+		$rauth->putAttribute(RADIUS_NAS_IP_ADDRESS, $nasip, "addr");
+		$rauth->putAttribute(RADIUS_NAS_IDENTIFIER, $nasid);
+
+		if(!empty($attributes['calling_station_id'])) {
+			$rauth->putAttribute(RADIUS_CALLING_STATION_ID, $attributes['calling_station_id']);
+		}
+		// Carefully check that interface has a MAC address
+		if(!empty($nasmac)) {
+			$nasmac = mac_format($nasmac);
+			$rauth->putAttribute(RADIUS_CALLED_STATION_ID, $nasmac.':'.gethostname());
+		}
+		if(!empty($attributes['nas_port_type'])) {
+			$rauth->putAttribute(RADIUS_NAS_PORT_TYPE, $attributes['nas_port_type']);
+		}
+		if(!empty($attributes['nas_port'])) {
+			$rauth->putAttribute(RADIUS_NAS_PORT, intval($attributes['nas_port']), 'integer');
+		}
+		if(!empty($attributes['framed_ip']) && is_ipaddr($attributes['framed_ip'])) {
+			$rauth->putAttribute(RADIUS_FRAMED_IP_ADDRESS, $attributes['framed_ip'], "addr");
 		}
 	}
 
@@ -1610,27 +1756,28 @@ function radius_backed($username, $password, $authcfg, &$attributes = array()) {
 	/* Send request */
 	$result = $rauth->send();
 	if (PEAR::isError($result)) {
-		$retvalue['auth_val'] = 1;
-		$retvalue['error'] = $result->getMessage();
-		if ($debug) {
-			printf(gettext("RADIUS send failed: %s") . "<br />\n", $retvalue['error']);
-		}
+		log_error(sprintf(gettext("Error during RADIUS authentication : %s"), $rauth->getError()));
+		$attributes['error_message'] = gettext("Error : could not connect to authentication server.");
+		$ret = null;
 	} else if ($result === true) {
-		if ($rauth->getAttributes()) {
-			$attributes = $rauth->listAttributes();
-		}
-		$retvalue['auth_val'] = 2;
-		if ($debug) {
-			printf(gettext("RADIUS Auth succeeded")."<br />\n");
-		}
 		$ret = true;
 	} else {
-		$retvalue['auth_val'] = 3;
-		if ($debug) {
-			printf(gettext("RADIUS Auth rejected")."<br />\n");
+		$ret = false;
+	}
+
+
+	// Get attributes, even if auth failed.
+	if ($rauth->getAttributes()) {
+	$attributes = array_merge($attributes,$rauth->listAttributes());
+
+	// We convert the session_terminate_time to unixtimestamp if its set before returning the whole array to our caller
+	if (!empty($attributes['session_terminate_time'])) {
+			$stt = &$attributes['session_terminate_time'];
+			$stt = strtotime(preg_replace("/\+(\d+):(\d+)$/", " +\${1}\${2}", preg_replace("/(\d+)T(\d+)/", "\${1} \${2}",$stt)));
 		}
 	}
 
+	// close OO RADIUS_AUTHENTICATION
 	$rauth->close();
 
 	return $ret;
@@ -1771,7 +1918,7 @@ function auth_get_authserver($name) {
 		}
 	}
 	if ($name == "Local Database") {
-		return array("name" => gettext("Local Database"), "type" => "Local Auth", "host" => $config['system']['hostname']);
+		return array("name" => "Local Database", "type" => "Local Auth", "host" => $config['system']['hostname']);
 	}
 }
 
@@ -1787,7 +1934,7 @@ function auth_get_authserver_list() {
 		}
 	}
 
-	$list["Local Database"] = array("name" => gettext("Local Database"), "type" => "Local Auth", "host" => $config['system']['hostname']);
+	$list["Local Database"] = array("name" => "Local Database", "type" => "Local Auth", "host" => $config['system']['hostname']);
 	return $list;
 }
 
@@ -1821,6 +1968,12 @@ function getUserGroups($username, $authcfg, &$attributes = array()) {
 	return $member_groups;
 }
 
+/*
+Possible return values :
+true : authentication worked
+false : authentication failed (invalid login/password, not enough permission, etc...)
+null : error during authentication process (unable to reach remote server, etc...)
+*/
 function authenticate_user($username, $password, $authcfg = NULL, &$attributes = array()) {
 
 	if (is_array($username) || is_array($password)) {
@@ -1828,25 +1981,33 @@ function authenticate_user($username, $password, $authcfg = NULL, &$attributes =
 	}
 
 	if (!$authcfg) {
-		return local_backed($username, $password);
+		return local_backed($username, $password, $attributes);
 	}
 
 	$authenticated = false;
 	switch ($authcfg['type']) {
 		case 'ldap':
-			if (ldap_backed($username, $password, $authcfg)) {
-				$authenticated = true;
+			try {
+				$authenticated = ldap_backed($username, $password, $authcfg, $attributes);
+			} catch (Exception $e) {
+				log_error(sprintf(gettext("LDAP authentication error: %s"), $e->getMessage()));
 			}
 			break;
+
+			break;
 		case 'radius':
-			if (radius_backed($username, $password, $authcfg, $attributes)) {
-				$authenticated = true;
+			try {
+				$authenticated = radius_backed($username, $password, $authcfg, $attributes);
+			} catch (Exception $e) {
+				log_error(sprintf(gettext("RADIUS authentication error: %s"), $e->getMessage()));
 			}
 			break;
 		default:
 			/* lookup user object by name */
-			if (local_backed($username, $password)) {
-				$authenticated = true;
+			try {
+				$authenticated = local_backed($username, $password, $attributes);
+			} catch (Exception $e) {
+				log_error(sprintf(gettext("Local authentication error: %s"), $e->getMessage()));
 			}
 			break;
 		}
@@ -1876,8 +2037,8 @@ function session_auth() {
 	}
 
 	/* Validate incoming login request */
-	$attributes = array();
-	if (isset($_POST['login']) && !empty($_POST['usernamefld']) && !empty($_POST['passwordfld'])) {
+	$attributes = array('nas_identifier' => 'webConfigurator-' . gethostname());
+	if (isset($_POST['login']) && !empty($_POST['usernamefld'])) {
 		$authcfg = auth_get_authserver($config['system']['webgui']['authmode']);
 		$remoteauth = authenticate_user($_POST['usernamefld'], $_POST['passwordfld'], $authcfg, $attributes);
 		if ($remoteauth || authenticate_user($_POST['usernamefld'], $_POST['passwordfld'])) {
@@ -1885,13 +2046,22 @@ function session_auth() {
 			session_regenerate_id();
 			$_SESSION['Logged_In'] = "True";
 			$_SESSION['remoteauth'] = $remoteauth;
+			if ($remoteauth) {
+				if (empty($authcfg['type']) || ($authcfg['type'] == "Local Auth")) {
+					$_SESSION['authsource'] = "Local Database";
+				} else {
+					$_SESSION['authsource'] = strtoupper($authcfg['type']) . "/{$authcfg['name']}";
+				}
+			} else {
+				$_SESSION['authsource'] = 'Local Database Fallback';
+			}
 			$_SESSION['Username'] = $_POST['usernamefld'];
 			$_SESSION['user_radius_attributes'] = $attributes;
 			$_SESSION['last_access'] = time();
 			$_SESSION['protocol'] = $config['system']['webgui']['protocol'];
 			phpsession_end(true);
 			if (!isset($config['system']['webgui']['quietlogin'])) {
-				log_auth(sprintf(gettext("Successful login for user '%1\$s' from: %2\$s"), $_POST['usernamefld'], $_SERVER['REMOTE_ADDR']));
+				log_auth(sprintf(gettext("Successful login for user '%1\$s' from: %2\$s"), $_POST['usernamefld'], get_user_remote_address() . get_user_remote_authsource()));
 			}
 			if (isset($_POST['postafterlogin'])) {
 				return true;
@@ -1905,7 +2075,7 @@ function session_auth() {
 		} else {
 			/* give the user an error message */
 			$_SESSION['Login_Error'] = gettext("Username or Password incorrect");
-			log_auth("webConfigurator authentication error for '{$_POST['usernamefld']}' from {$_SERVER['REMOTE_ADDR']}");
+			log_auth(sprintf(gettext("webConfigurator authentication error for user '%1\$s' from: %2\$s"), $_POST['usernamefld'], get_user_remote_address() . get_user_remote_authsource()));
 			if (isAjax()) {
 				echo "showajaxmessage('{$_SESSION['Login_Error']}');";
 				return;
@@ -1950,9 +2120,9 @@ function session_auth() {
 	if (isset($_POST['logout'])) {
 
 		if ($_SESSION['Logout']) {
-			log_error(sprintf(gettext("Session timed out for user '%1\$s' from: %2\$s"), $_SESSION['Username'], $_SERVER['REMOTE_ADDR']));
+			log_error(sprintf(gettext("Session timed out for user '%1\$s' from: %2\$s"), $_SESSION['Username'], get_user_remote_address() . get_user_remote_authsource()));
 		} else {
-			log_error(sprintf(gettext("User logged out for user '%1\$s' from: %2\$s"), $_SESSION['Username'], $_SERVER['REMOTE_ADDR']));
+			log_error(sprintf(gettext("User logged out for user '%1\$s' from: %2\$s"), $_SESSION['Username'], get_user_remote_address() . get_user_remote_authsource()));
 		}
 
 		/* wipe out $_SESSION */
@@ -2006,5 +2176,21 @@ function print_credit() {
 			'<a target="_blank" href="https://netgate.com">Netgate. </a>' . ' &copy; ESF ' . $g["product_copyright_years"] .
 			'<a target="_blank" href="https://pfsense.org/license">' .
 			gettext(' View license.') . '</a>';
+}
+function get_user_remote_address() {
+	$remote_address = $_SERVER['REMOTE_ADDR'];
+	if (!empty($_SERVER['HTTP_CLIENT_IP'])) {
+		$remote_address .= "[{$_SERVER['HTTP_CLIENT_IP']}]";
+	} elseif (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+		$remote_address .= "[{$_SERVER['HTTP_X_FORWARDED_FOR']}]";
+	}
+	return $remote_address;
+}
+function get_user_remote_authsource() {
+	$authsource = "";
+	if (!empty($_SESSION['authsource'])) {
+		$authsource .= " ({$_SESSION['authsource']})";
+	}
+	return $authsource;
 }
 ?>

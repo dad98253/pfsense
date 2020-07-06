@@ -2,7 +2,8 @@
  * pfSense.css
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2016-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2016 Electric Sheep Fencing
+ * Copyright (c) 2016-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,7 +21,7 @@
 
 @import url("/vendor/bootstrap/css/bootstrap.min.css");
 @import url("/css/fonts/roboto.css");
-@import url("/vendor/jquery/jquery-ui/themes/smoothness/theme.css");
+@import url("/vendor/jquery-ui/jquery-ui-1.12.1.min.css");
 
 html {
     position: relative;
@@ -712,7 +713,7 @@ textarea
 
 /*
  * CSS for Standard tree layout
- * Copyright (C) 2005 SilverStripe Limited
+ * Copyright (c) 2005 SilverStripe Limited
  * Feel free to use this on your websites, but please leave this message in the fies
  * http://www.silverstripe.com/blog
  */
@@ -925,7 +926,7 @@ a[href]:after {
     content: normal;
 }
 
-/** Text color for diff display when comapring configs */
+/** Text color for diff display when comparing configs */
 .diff-text {
     color: #000000;
 }

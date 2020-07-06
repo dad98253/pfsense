@@ -3,7 +3,9 @@
  * firewall_virtual_ip_edit.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2005 Bill Marquette <bill.marquette@gmail.com>
  * All rights reserved.
  *
@@ -35,14 +37,7 @@ require_once("guiconfig.inc");
 require_once("filter.inc");
 require_once("shaper.inc");
 
-if (!is_array($config['virtualip'])) {
-		$config['virtualip'] = array();
-}
-
-if (!is_array($config['virtualip']['vip'])) {
-		$config['virtualip']['vip'] = array();
-}
-
+init_config_arr(array('virtualip', 'vip'));
 $a_vip = &$config['virtualip']['vip'];
 
 if (isset($_REQUEST['id']) && is_numericint($_REQUEST['id'])) {
@@ -433,7 +428,7 @@ $section->addInput(new Form_Input(
 ))->setHelp('A description may be entered here for administrative reference (not parsed).');
 
 if (isset($id) && $a_vip[$id]) {
-	$section->addInput(new Form_Input(
+	$form->addGlobal(new Form_Input(
 		'id',
 		null,
 		'hidden',
@@ -441,7 +436,7 @@ if (isset($id) && $a_vip[$id]) {
 	));
 }
 
-$section->addInput(new Form_Input(
+$form->addGlobal(new Form_Input(
 	'uniqid',
 	null,
 	'hidden',
@@ -454,8 +449,8 @@ print($form);
 ?>
 
 <div class="infoblock">
-	<?php print_info_box(gettext("Proxy ARP and Other type Virtual IPs cannot be bound to by anything running on the firewall, such as IPsec, OpenVPN, etc.  Use a CARP or IP Alias type address for these types.") . '<br />' .
-			   sprintf(gettext("For more information on CARP and the above values, visit the OpenBSD %s"), '<a href="http://www.openbsd.org/faq/pf/carp.html">CARP FAQ</a>.'), 'info', false); ?>
+	<?php print_info_box(gettext("Proxy ARP and Other type Virtual IP addresses cannot be used for binding by services on the firewall (IPsec, OpenVPN, etc.). Use an IP Alias or CARP type VIP for these roles.") . '<br />' .
+			   sprintf(gettext("For more information, visit the pfSense book section on %s"), '<a href="https://docs.netgate.com/pfsense/en/latest/book/firewall/virtual-ip-addresses.html">Virtual IP Addresses</a>.'), 'info', false); ?>
 </div>
 
 <script type="text/javascript">
@@ -491,6 +486,13 @@ events.push(function() {
 		setRequired('password', false);
 		setRequired('vhid', false);
 		setRequired('advbase', false);
+
+		// Make sure the type is selected before allowing address to be selected.
+		if(mode == undefined){
+			disableInput('subnet', true);
+		}else{
+			disableInput('subnet', false);
+		}
 
 		if (mode == 'ipalias') {
 			$('#address_note').html("<?=$ipaliashelp?>");

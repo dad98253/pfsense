@@ -3,7 +3,9 @@
  * autoconfigbackup.inc
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2008-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2008-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -28,7 +30,7 @@ function get_device_key() {
 		exec("/usr/bin/nice -n20 /usr/bin/ssh-keygen -t ed25519 -b 4096 -N '' -f /etc/ssh//ssh_host_ed25519_key");
 	}
 
-	// The userkey (firewall identifier) is an MD5 has of the ed25519 public key
+	// The userkey (firewall identifier) is an sha256 hash of the ed25519 public key
 	return hash("sha256", file_get_contents("/etc/ssh/ssh_host_ed25519_key.pub"));
 }
 
@@ -39,12 +41,6 @@ if (isset($_REQUEST['userkey']) && !empty($_REQUEST['userkey'])) {
 } else {
 	$userkey = get_device_key();
 }
-
-// Defined username. Username must be sent lowercase. See Redmine #7127 and Netgate Redmine #163
-$username = strtolower($config['system']['acb']['gold_username']);
-
-// Defined password
-$password = $config['system']['acb']['gold_password'];
 
 $uniqueID = system_get_uniqueid();
 
@@ -99,11 +95,7 @@ function acb_custom_php_resync_config_command() {
 		return;
 	}
 
-	if (is_file("/cf/conf/lastpfSbackup.txt")) {
-		conf_mount_rw();
-		unlink("/cf/conf/lastpfSbackup.txt");
-		conf_mount_ro();
-	}
+	unlink_if_exists("/cf/conf/lastpfSbackup.txt");
 
 	if (!function_exists("filter_configure")) {
 		require_once("filter.inc");
@@ -135,14 +127,14 @@ function configure_proxy() {
 }
 
 function test_connection($post) {
-	global $savemsg, $config, $g, $legacy;
+	global $savemsg, $config, $g;
 
 	// Do nothing when booting or when not enabled
 	if (platform_booting() || !acb_enabled()) {
 		return;
 	}
 
-	// Seperator used during client / server communications
+	// Separator used during client / server communications
 	$oper_sep = "\|\|";
 
 	// Encryption password
@@ -158,16 +150,11 @@ function test_connection($post) {
 	$hostname = $config['system']['hostname'] . "." . $config['system']['domain'];
 
 	// URL to restore.php
-	$get_url = $legacy ? "https://portal.pfsense.org/pfSconfigbackups/restore.php":"https://acb.netgate.com/getbkp";
+	$get_url = "https://acb.netgate.com/getbkp";
 
 	// Populate available backups
 	$curl_session = curl_init();
 	curl_setopt($curl_session, CURLOPT_URL, $get_url);
-
-	if ($legacy) {
-		curl_setopt($curl_session, CURLOPT_HTTPHEADER, array("Authorization: Basic " . base64_encode("{$username}:{$password}")));
-	}
-
 	curl_setopt($curl_session, CURLOPT_SSL_VERIFYPEER, 1);
 	curl_setopt($curl_session, CURLOPT_POST, 1);
 	curl_setopt($curl_session, CURLOPT_RETURNTRANSFER, 1);
@@ -189,7 +176,7 @@ function test_connection($post) {
 	return;
 }
 
-function upload_config($reasonm = "") {
+function upload_config($manual = false) {
 	global $config, $g, $input_errors, $userkey, $uniqueID;
 
 	if (empty($userkey)) {
@@ -206,7 +193,7 @@ function upload_config($reasonm = "") {
 	}
 
 	/*
-	 * pfSense upload config to pfSense.org script
+	 * pfSense upload config to acb.netgate.com script
 	 * This file plugs into config.inc (/usr/local/pkg/parse_config)
 	 * and runs every time the running firewall filter changes.
 	 *
@@ -228,22 +215,13 @@ function upload_config($reasonm = "") {
 
 	$last_config_change = $config['revision']['time'];
 	$hostname = $config['system']['hostname'] . "." . $config['system']['domain'];
+	$reason	= $config['revision']['description'];
 
-	if ($reasonm) {
-		$reason = $reasonm;
+	if ($manual && array_key_exists('numman', $config['system']['acb'])) {
+		$manmax = $config['system']['acb']['numman'];
 	} else {
-		$reason	= $config['revision']['description'];
+		$manmax = "0";
 	}
-
-	/*
-	* Syncing vouchers happens every minute and sometimes multiple times. We don't
-	* want to fill up our db with a lot of the same config so just ignore that case.
-	*/
-	if((strpos($reason, 'Syncing vouchers') !== false ||
-		strpos($reason, 'Captive Portal Voucher database synchronized') !== false) ) {
-		return;
-	}
-
 
 	$encryptpw = $config['system']['acb']['encryption_password'];
 
@@ -254,20 +232,15 @@ function upload_config($reasonm = "") {
 		if (!file_exists("/cf/conf/autoconfigback.notice")) {
 			$notice_text = "The encryption password is not set for Automatic Configuration Backup.";
 			$notice_text .= " Please correct this in Services -> AutoConfigBackup -> Settings.";
-			//log_error($notice_text);
-			//file_notice("AutoConfigBackup", $notice_text, $notice_text, "");
-			conf_mount_rw();
+			log_error($notice_text);
+			file_notice("AutoConfigBackup", $notice_text, $notice_text, "");
 			touch("/cf/conf/autoconfigback.notice");
-			conf_mount_ro();
 		}
 	} else {
 		/* If configuration has changed, upload to pfS */
 		if ($last_backup_date <> $last_config_change) {
 
-			// Mount RW (if needed)
-			conf_mount_rw();
-
-			$notice_text = "Beginning configuration backup to ." . $upload_url;
+			$notice_text = "Beginning configuration backup to " . $upload_url;
 			log_error($notice_text);
 			update_filter_reload_status($notice_text);
 
@@ -286,7 +259,8 @@ function upload_config($reasonm = "") {
 				'userkey' => htmlspecialchars($userkey),
 				'sha256_hash' => $raw_config_sha256_hash,
 				'version' => $g['product_version'],
-				'hint' => $config['system']['acb']['hint']
+				'hint' => $config['system']['acb']['hint'],
+				'manmax' => $manmax
 			);
 
 			// Check configuration into the ESF repo
@@ -296,7 +270,7 @@ function upload_config($reasonm = "") {
 			curl_setopt($curl_session, CURLOPT_POST, count($post_fields));
 			curl_setopt($curl_session, CURLOPT_POSTFIELDS, $post_fields);
 			curl_setopt($curl_session, CURLOPT_RETURNTRANSFER, 1);
-			curl_setopt($curl_session, CURLOPT_SSL_VERIFYPEER, 0);
+			curl_setopt($curl_session, CURLOPT_SSL_VERIFYPEER, 1);
 			curl_setopt($curl_session, CURLOPT_CONNECTTIMEOUT, 55);
 			curl_setopt($curl_session, CURLOPT_TIMEOUT, 30);
 			curl_setopt($curl_session, CURLOPT_USERAGENT, $g['product_name'] . '/' . rtrim(file_get_contents("/etc/version")));
@@ -305,7 +279,7 @@ function upload_config($reasonm = "") {
 
 			$data = curl_exec($curl_session);
 
-			unlink($tmpname);
+			unlink_if_exists($tmpname);
 
 			if (curl_errno($curl_session)) {
 				$fd = fopen("/tmp/backupdebug.txt", "w");
@@ -318,9 +292,9 @@ function upload_config($reasonm = "") {
 			}
 
 			if (strpos($data, "500") != false) {
-				$notice_text = "An error occurred while uploading your pfSense configuration to " . $upload_url . " (" . htmlspecialchars($data) . ")";
+				$notice_text = gettext("An error occurred while uploading your pfSense configuration to ") . $upload_url . " (" . htmlspecialchars($data) . ")";
 				log_error($notice_text . " - " . $data);
-				file_notice("AutoConfigBackup", $notice_text, "Backup Failure", "/pkg_edit.php?xml=autoconfigbackup.xml&id=0");
+				file_notice("AutoConfigBackup", $notice_text);
 				update_filter_reload_status($notice_text);
 				$input_errors["acb_upload"] = $notice_text;
 			} else {
@@ -333,12 +307,9 @@ function upload_config($reasonm = "") {
 				update_filter_reload_status($notice_text);
 			}
 
-			// Mount image RO (if needed)
-			conf_mount_ro();
-
 		} else {
 			// Debugging
-			//log_error("No https://portal.pfsense.org backup required.");
+			//log_error("No https://acb.netgate.com backup required.");
 		}
 	}
 }

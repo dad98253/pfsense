@@ -3,7 +3,9 @@
  * head.inc
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -70,6 +72,7 @@ if (!isset($config['system']['webgui']['dashboardcolumns'])) {
 	<script type="text/javascript">
 	//<![CDATA[
 	var events = events || [];
+	var newSeperator = false;
 	//]]>
 	</script>
 </head>
@@ -153,9 +156,11 @@ function return_ext_menu($section) {
 
 	if ((!empty($config['installedpackages']['package'])) && (!empty($config['installedpackages']['menu']))) {
 		foreach ($config['installedpackages']['menu'] as $menu) {
-//			print('Name: ' . $menu['name'] . ', Pkg category: ' . $menu['category'] . ', Section: ' . $section . '<br />');
-			if ($menu['section'] == $section) {
-				$ext_menu_entries[] = $menu;
+			if (isset($menu['name']) && ($menu['name'] != "AutoConfigBackup")) { // AutoConfigBackup was moved to a built-in function
+	//			print('Name: ' . $menu['name'] . ', Pkg category: ' . $menu['category'] . ', Section: ' . $section . '<br />');
+				if (isset($menu['section']) && ($menu['section'] == $section)) {
+					$ext_menu_entries[] = $menu;
+				}
 			}
 		}
 	}
@@ -244,13 +249,13 @@ $system_menu[] = array(gettext("Package Manager"), "/pkg_mgr_installed.php");
 $system_menu[] = array(gettext("Setup Wizard"), "/wizard.php?xml=setup_wizard.xml");
 $system_menu[] = array(gettext("Routing"), "/system_gateways.php");
 $system_menu[] = array(gettext("Cert. Manager"), "/system_camanager.php");
-if (!isAllowedPage("system_usermanager.php*")) {
+if (!isAllowedPage("system_usermanager.php")) {
 	$system_menu[] = array(gettext("User Manager"), "/system_usermanager_passwordmg.php");
 } else {
 	$system_menu[] = array(gettext("User Manager"), "/system_usermanager.php");
 }
 
-if ($user_settings['customsettings'] && isAllowedPage("system_user_settings.php*")) {
+if ($user_settings['customsettings'] && isAllowedPage("system_user_settings.php")) {
 	$system_menu[] = array(gettext("User Settings"), "/system_user_settings.php");
 }
 
@@ -318,7 +323,6 @@ if ($g['services_dhcp_server_enable']) {
 
 $services_menu[] = array(gettext("Dynamic DNS"), "/services_dyndns.php");
 $services_menu[] = array(gettext("IGMP Proxy"), "/services_igmpproxy.php");
-$services_menu[] = array(gettext("Load Balancer"), "/load_balancer_pool.php");
 $services_menu[] = array(gettext("NTP"), "/services_ntpd.php");
 $services_menu[] = array(gettext("PPPoE Server"), "/services_pppoe.php");
 $services_menu[] = array(gettext("SNMP"), "/services_snmp.php");
@@ -353,14 +357,12 @@ $status_menu[] = array(gettext("DNS Resolver"), "/status_unbound.php");
 $status_menu[] = array(gettext("Filter Reload"), "/status_filter_reload.php?user=true");
 $status_menu[] = array(gettext("Interfaces"), "/status_interfaces.php");
 $status_menu[] = array(gettext("IPsec"), "/status_ipsec.php");
-$status_menu[] = array(gettext("Load Balancer"), "/status_lb_pool.php");
 $status_menu[] = array(gettext("NTP"), "/status_ntpd.php");
 $status_menu[] = array(gettext("OpenVPN"), "/status_openvpn.php");
-$status_menu[] = array(gettext("Package Logs"), "/status_pkglogs.php");
 $status_menu[] = array(gettext("Queues"), "/status_queues.php");
 $status_menu[] = array(gettext("Services"), "/status_services.php");
 $status_menu[] = array(gettext("System Logs"), "/status_logs.php");
-$status_menu[] = array(gettext("Traffic Graph"), "/status_graph.php?if=wan");
+$status_menu[] = array(gettext("Traffic Graph"), "/status_graph.php");
 
 if (count($config['interfaces']) > 1) {
 	$status_menu[] = array(gettext("UPnP &amp; NAT-PMP"), "/status_upnp.php");
@@ -415,22 +417,19 @@ $diagnostics_menu[] = array(gettext("Packet Capture"), "/diag_packet_capture.php
 
 $diagnostics_menu = msort(array_merge($diagnostics_menu, return_ext_menu("Diagnostics")), 0);
 
-$gold_menu = array();
-$gold_menu[] = array(gettext("pfSense Gold"), "https://www.pfsense.org/gold");
-$gold_menu = msort(array_merge($gold_menu, return_ext_menu("Gold")), 0);
-
 if (!$g['disablehelpmenu']) {
 	$help_menu = array();
 	$help_menu[] = array(gettext("About this Page"), $helpurl);
 	if ($g['product_name'] == "pfSense") {
-		$help_menu[] = array(gettext("Bug Database"), "https://www.pfsense.org/j.php?jumpto=redmine");
+		$help_menu[] = array(gettext("Bug Database"), "https://redirects.netgate.com/issues");
 	}
 
-	$help_menu[] = array(gettext("User Forum"), "https://www.pfsense.org/j.php?jumpto=forum");
-	$help_menu[] = array(gettext("Documentation"), "https://www.pfsense.org/j.php?jumpto=doc");
-	$help_menu[] = array(gettext("Paid Support"), "https://www.netgate.com/support");
-	$help_menu[] = array(gettext("pfSense Book"), "https://www.pfsense.org/j.php?jumpto=book");
-	$help_menu[] = array(gettext("FreeBSD Handbook"), "https://www.pfsense.org/j.php?jumpto=fbsdhandbook");
+	$help_menu[] = array(gettext("User Forum"), "https://redirects.netgate.com/forum");
+	$help_menu[] = array(gettext("Documentation"), "https://redirects.netgate.com/docs");
+	$help_menu[] = array(gettext("Paid Support"), "https://redirects.netgate.com/support");
+	$help_menu[] = array(gettext("pfSense Book"), "https://redirects.netgate.com/book");
+	$help_menu[] = array(gettext("FreeBSD Handbook"), "https://redirects.netgate.com/fbsdhandbook");
+	$help_menu[] = array(gettext("User survey"), "https://redirects.netgate.com/survey_1");
 	$help_menu = msort(array_merge($help_menu, return_ext_menu("Help")), 0);
 }
 
@@ -495,7 +494,6 @@ if (are_notices_pending()) {
 					['name' => 'VPN',		     'menu' => $vpn_menu,		  'href' => null],
 					['name' => 'Status',	     'menu' => $status_menu,	  'href' => null],
 					['name' => 'Diagnostics',    'menu' => $diagnostics_menu, 'href' => null],
-//					['name' => 'Gold',		     'menu' => $gold_menu,		  'href' => '_blank'],
                     ['name' => $help_menu_title, 'menu' => $help_menu,		  'href' => '_blank']
 				] as $item):
 					if ($item['name'] == 'Help' && $g['disablehelpmenu']) {
@@ -635,6 +633,11 @@ if (are_notices_pending()) {
 	<?php endif?>
 
 <?php
+/* Determine shortcut section for XML-based packages */
+if (empty($shortcut_section) && !empty($xmlfile)) {
+	$shortcut_section = basename($pagename, '.xml');
+}
+
 if (!$hide_service_status && !empty($shortcuts[$shortcut_section]['service']) && isAllowedPage('status_services.php')) {
 	$ssvc = array();
 	switch ($shortcut_section) {
@@ -677,15 +680,26 @@ if (('' != ($link = get_shortcut_log_link($shortcut_section, false))) && (isAllo
 	</header>
 <?php
 /* if upgrade in progress, alert user */
-if (is_subsystem_dirty('packagelock') || (file_exists('/conf/needs_package_sync') && platform_booting())) {
-	if (file_exists('/conf/needs_package_sync') && platform_booting()) {
-		$warning_text = sprintf(gettext('%1$s%3$s is booting, then packages will be reinstalled in the background.%2$s%1$sDo not make changes in the GUI until this is complete.%2$s'), '<p>', '</p>', $g['product_name']);
-	} else {
-		$pgtitle = array(gettext("System"), gettext("Package Manager"));
-		$warning_text = sprintf(gettext('%1$sPackages are currently being reinstalled in the background.%2$s%1$sDo not make changes in the GUI until this is complete.%2$s'), '<p>', '</p>');
-		$warning_text .= sprintf(gettext('%1$sIf the above message is still displayed after a couple of hours, use the \'Clear Package Lock\' button on the %3$s page and reinstall packages manually.%2$s'), '<p>', '</p>', sprintf('<a href="diag_backup.php" title="%1$s &gt; %2$s">%1$s &gt; %2$s</a>', gettext('Diagnostics'), htmlspecialchars(gettext('Backup & Restore'))));
-	}
+$warning_text = "";
+if (file_exists('/conf/needs_package_sync') && platform_booting()) {
+	$warning_text = sprintf(gettext(
+	    '%1$s%3$s is booting, then packages will be reinstalled in the ' .
+	    'background.%2$s%1$sDo not make changes in the GUI until this is ' .
+	    'complete.%2$s'), '<p>', '</p>', $g['product_name']);
+} elseif (is_subsystem_dirty('packagelock')) {
+	$pgtitle = array(gettext("System"), gettext("Package Manager"));
+	$warning_text = sprintf(gettext('%1$sPackages are currently being ' .
+	    'reinstalled in the background.%2$s%1$sDo not make changes in ' .
+	    'the GUI until this is complete.%2$s'), '<p>', '</p>');
+	$warning_text .= sprintf(gettext('%1$sIf the above message is still ' .
+	    'displayed after a couple of hours, use the \'Clear Package ' .
+	    'Lock\' button on the %3$s page and reinstall packages manually.' .
+	    '%2$s'), '<p>', '</p>', sprintf('<a href="diag_backup.php" ' .
+	    'title="%1$s &gt; %2$s">%1$s &gt; %2$s</a>', gettext('Diagnostics'),
+	    htmlspecialchars(gettext('Backup & Restore'))));
+}
 
+if (!empty($warning_text)) {
 	print_info_box($warning_text);
 }
 

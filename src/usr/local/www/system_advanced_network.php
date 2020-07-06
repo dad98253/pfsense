@@ -3,7 +3,9 @@
  * system_advanced_network.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2008 Shrew Soft Inc
  * All rights reserved.
  *
@@ -38,16 +40,16 @@ require_once("shaper.inc");
 
 
 $pconfig['ipv6nat_enable'] = isset($config['diag']['ipv6nat']['enable']);
-$pconfig['ipv6nat_ipaddr'] = $config['diag']['ipv6nat']['ipaddr'];
+$pconfig['ipv6nat_ipaddr'] = isset($config['diag']['ipv6nat']['ipaddr']) ? $config['diag']['ipv6nat']['ipaddr'] : null;
 $pconfig['ipv6allow'] = isset($config['system']['ipv6allow']);
 $pconfig['ipv6dontcreatelocaldns'] = isset($config['system']['ipv6dontcreatelocaldns']);
-$pconfig['global-v6duid'] = $config['system']['global-v6duid'];
+$pconfig['global-v6duid'] = isset($config['system']['global-v6duid']) ? $config['system']['global-v6duid'] : null;
 $pconfig['prefer_ipv4'] = isset($config['system']['prefer_ipv4']);
-$pconfig['sharednet'] = $config['system']['sharednet'];
+$pconfig['sharednet'] = isset($config['system']['sharednet']) ? $config['system']['sharednet'] : null;
 $pconfig['disablechecksumoffloading'] = isset($config['system']['disablechecksumoffloading']);
 $pconfig['disablesegmentationoffloading'] = isset($config['system']['disablesegmentationoffloading']);
 $pconfig['disablelargereceiveoffloading'] = isset($config['system']['disablelargereceiveoffloading']);
-$pconfig['ip_change_kill_states'] = $config['system']['ip_change_kill_states'];
+$pconfig['ip_change_kill_states'] = isset($config['system']['ip_change_kill_states']) ? $config['system']['ip_change_kill_states'] : null;
 
 if ($_POST) {
 
@@ -104,14 +106,14 @@ if ($_POST) {
 	if (!$input_errors) {
 
 		if ($_POST['ipv6nat_enable'] == "yes") {
+			init_config_arr(array('diag', 'ipv6nat'));
 			$config['diag']['ipv6nat']['enable'] = true;
 			$config['diag']['ipv6nat']['ipaddr'] = $_POST['ipv6nat_ipaddr'];
 		} else {
-			if ($config['diag']) {
-				if ($config['diag']['ipv6nat']) {
-					unset($config['diag']['ipv6nat']['enable']);
-					unset($config['diag']['ipv6nat']['ipaddr']);
-				}
+			if (is_array($config['diag']) &&
+			    is_array($config['diag']['ipv6nat'])) {
+				unset($config['diag']['ipv6nat']['enable']);
+				unset($config['diag']['ipv6nat']['ipaddr']);
 			}
 		}
 
@@ -392,16 +394,6 @@ $section->addInput(new Form_Checkbox(
 	isset($pconfig['ip_change_kill_states'])
 ))->setHelp('This option resets all states when a WAN IP Address changes instead of only '.
     'states associated with the previous IP Address.');
-
-if (get_freebsd_version() == 8) {
-	$section->addInput(new Form_Checkbox(
-		'flowtable',
-		'Enable flowtable support',
-		$pconfig['flowtable']
-	))->setHelp('Enables infrastructure for caching flows as a means of accelerating '.
-		'L3 and L2 lookups as well as providing stateful load balancing when used with '.
-		'RADIX_MPATH.');
-}
 
 $form->add($section);
 print $form;

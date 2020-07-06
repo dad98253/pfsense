@@ -3,7 +3,9 @@
  * service-utils.inc
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2005-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2005-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2005-2006 Colin Smith (ethethlay@gmail.com)
  * All rights reserved.
  *
@@ -28,7 +30,6 @@ require_once("openvpn.inc");
 require_once("system.inc");
 require_once("util.inc");
 require_once("vpn.inc");
-require_once("vslb.inc");
 
 define("RCFILEPREFIX", "/usr/local/etc/rc.d/");
 function write_rcfile($params) {
@@ -52,7 +53,7 @@ function write_rcfile($params) {
 	$towrite .= "\t{$params['start']}\n";
 	$towrite .= "}\n\n";
 	if (!empty($params['stop'])) {
-		$tokill =& $params['stop'];
+		$tokill = &$params['stop'];
 	} else if (!empty($params['executable'])) {
 		/* just nuke the executable */
 		$tokill = "/usr/bin/killall " . escapeshellarg($params['executable']);
@@ -74,7 +75,7 @@ function write_rcfile($params) {
 	return;
 }
 
-function start_service($name) {
+function start_service($name, $after_sync = false) {
 	global $config;
 
 	if (empty($name)) {
@@ -83,11 +84,16 @@ function start_service($name) {
 
 	if (is_array($config['installedpackages']) && is_array($config['installedpackages']['service'])) {
 		foreach ($config['installedpackages']['service'] as $service) {
-			if (strtolower($service['name']) == strtolower($name)) {
+			if (isset($service['name']) && (strtolower($service['name']) == strtolower($name))) {
+				/* Avoid starting twice if this is called just after a
+				 * package sync which starts the service itself. */
+				if ($after_sync && isset($service['starts_on_sync'])) {
+					break;
+				}
 				if ($service['rcfile']) {
 					$prefix = RCFILEPREFIX;
 					if (!empty($service['prefix'])) {
-						$prefix =& $service['prefix'];
+						$prefix = &$service['prefix'];
 					}
 					if (file_exists("{$prefix}{$service['rcfile']}") || is_link("{$prefix}{$service['rcfile']}")) {
 						mwexec_bg("{$prefix}{$service['rcfile']} start");
@@ -115,7 +121,7 @@ function stop_service($name) {
 				if ($service['rcfile']) {
 					$prefix = RCFILEPREFIX;
 					if (!empty($service['prefix'])) {
-						$prefix =& $service['prefix'];
+						$prefix = &$service['prefix'];
 					}
 					if (file_exists("{$prefix}{$service['rcfile']}") || is_link("{$prefix}{$service['rcfile']}")) {
 						mwexec("{$prefix}{$service['rcfile']} stop");
@@ -202,7 +208,7 @@ function is_service_running($service, $ps = "") {
 
 	if (is_array($config['installedpackages']['service'])) {
 		foreach ($config['installedpackages']['service'] as $aservice) {
-			if (strtolower($service) == strtolower($aservice['name'])) {
+			if (isset($aservice['name']) && (strtolower($service) == strtolower($aservice['name']))) {
 				if ($aservice['custom_php_service_status_command'] <> "") {
 					eval("\$rc={$aservice['custom_php_service_status_command']};");
 					return $rc;
@@ -259,9 +265,16 @@ function get_services() {
 	}
 
 	$pconfig = array();
-	$pconfig['name'] = "ntpd";
-	$pconfig['description'] = gettext("NTP clock sync");
+	$pconfig['name'] = "pcscd";
+	$pconfig['description'] = gettext("PC/SC Smart Card Daemon");
 	$services[] = $pconfig;
+
+	if (is_array($config['ntpd']) && ($config['ntpd']['enable'] != 'disabled')) {
+		$pconfig = array();
+		$pconfig['name'] = "ntpd";
+		$pconfig['description'] = gettext("NTP clock sync");
+		$services[] = $pconfig;
+	}
 
 	$pconfig = array();
 	$pconfig['name'] = "syslogd";
@@ -346,7 +359,7 @@ function get_services() {
 		$services[] = $pconfig;
 	}
 
-	if (isset($config['system']['enablesshd'])) {
+	if (isset($config['system']['ssh']['enable'])) {
 		$pconfig = array();
 		$pconfig['name'] = "sshd";
 		$pconfig['description'] = gettext("Secure Shell Daemon");
@@ -369,24 +382,13 @@ function get_services() {
 		}
 	}
 
-	if (!is_array($config['load_balancer']['lbpool'])) {
-		$config['load_balancer']['lbpool'] = array();
-	}
-
-	if (is_array($config['load_balancer']['virtual_server']) && count($config['load_balancer']['virtual_server']) && count($config['load_balancer']['lbpool'])) {
-		$pconfig = array();
-		$pconfig['name'] = "relayd";
-		$pconfig['description'] = gettext("Server load balancing daemon");
-		$services[] = $pconfig;
-	}
-
 	return $services;
 }
 
 function find_service_by_name($name) {
 	$services = get_services();
 	foreach ($services as $service) {
-		if ($service["name"] == $name) {
+		if (isset($service["name"]) && ($service["name"] == $name)) {
 			return $service;
 		}
 	}
@@ -396,7 +398,7 @@ function find_service_by_name($name) {
 function find_service_by_openvpn_vpnid($vpnid) {
 	$services = get_services();
 	foreach ($services as $service) {
-		if (($service["name"] == "openvpn") && isset($service["vpnid"]) && ($service["vpnid"] == $vpnid)) {
+		if (isset($service["name"]) && ($service["name"] == "openvpn") && isset($service["vpnid"]) && ($service["vpnid"] == $vpnid)) {
 			return $service;
 		}
 	}
@@ -406,7 +408,7 @@ function find_service_by_openvpn_vpnid($vpnid) {
 function find_service_by_cp_zone($zone) {
 	$services = get_services();
 	foreach ($services as $service) {
-		if (($service["name"] == "captiveportal") && isset($service["zone"]) && ($service["zone"] == $zone)) {
+		if (isset($service["name"]) && ($service["name"] == "captiveportal") && isset($service["zone"]) && ($service["zone"] == $zone)) {
 			return $service;
 		}
 	}
@@ -421,6 +423,9 @@ function service_description_compare($a, $b) {
 }
 
 function service_name_compare($a, $b) {
+	if (!isset($a['name']) || !isset($b['name'])) {
+		return -1;
+	}
 	/* If the names are equal, fall back to sorting by description */
 	if (strtolower($a['name']) == strtolower($b['name'])) {
 		return service_description_compare($a, $b);
@@ -478,7 +483,7 @@ function get_service_status($service) {
 			$running = is_pid_running("{$g['varrun_path']}/dhcrelay6.pid");
 			break;
 		case 'ipsec':
-			$running = is_pid_running("{$g['varrun_path']}/charon.pid");
+			$running = (is_pid_running("{$g['varrun_path']}/charon.pid") || is_process_running('charon'));
 			break;
 		default:
 			$running = is_service_running($service['name']);
@@ -632,7 +637,7 @@ function service_control_start($name, $extras) {
 			upnp_action('start');
 			break;
 		case 'ipsec':
-			vpn_ipsec_force_reload();
+			ipsec_force_reload();
 			break;
 		case 'sshd':
 			send_event("service restart sshd");
@@ -641,18 +646,17 @@ function service_control_start($name, $extras) {
 			$vpnmode = isset($extras['vpnmode']) ? htmlspecialchars($extras['vpnmode']) : htmlspecialchars($extras['mode']);
 			if (($vpnmode == "server") || ($vpnmode == "client")) {
 				$id = isset($extras['vpnid']) ? htmlspecialchars($extras['vpnid']) : htmlspecialchars($extras['id']);
-				$configfile = "{$g['varetc_path']}/openvpn/{$vpnmode}{$id}.conf";
+				$configfile = "{$g['openvpn_base']}/{$vpnmode}{$id}/config.ovpn";
 				if (file_exists($configfile)) {
 					openvpn_restart_by_vpnid($vpnmode, $id);
 				}
 			}
 			break;
-		case 'relayd':
-			relayd_configure();
-			filter_configure();
-			break;
 		case 'syslogd':
 			system_syslogd_start();
+			break;
+		case 'pcscd':
+			mwexec_bg("service pcscd onestart");
 			break;
 		default:
 			start_service($name);
@@ -711,7 +715,7 @@ function service_control_stop($name, $extras) {
 			killbyname("sshd");
 			break;
 		case 'ipsec':
-			exec("/usr/local/sbin/ipsec stop");
+			exec("/usr/local/sbin/strongswanrc stop");
 			break;
 		case 'openvpn':
 			$vpnmode = htmlspecialchars($extras['vpnmode']);
@@ -720,9 +724,6 @@ function service_control_stop($name, $extras) {
 				$pidfile = "{$g['varrun_path']}/openvpn_{$vpnmode}{$id}.pid";
 				killbypid($pidfile);
 			}
-			break;
-		case 'relayd':
-			sigkillbyname("relayd", "TERM");
 			break;
 		case 'syslogd':
 			if (isvalidpid("{$g['varrun_path']}/syslog.pid")) {
@@ -733,8 +734,11 @@ function service_control_stop($name, $extras) {
 				sigkillbypid("{$g['varrun_path']}/syslog.pid", "KILL");
 				usleep(100000);
 			}
-			/* Make sure sshlockout_pf stops as well */
-			sigkillbyname("sshlockout_pf", "TERM");
+			/* Make sure sshguard stops as well */
+			sigkillbyname("sshguard", "TERM");
+			break;
+		case 'pcscd':
+			mwexec_bg("service pcscd onestop");
 			break;
 		default:
 			stop_service($name);
@@ -787,7 +791,7 @@ function service_control_restart($name, $extras) {
 			upnp_action('restart');
 			break;
 		case 'ipsec':
-			vpn_ipsec_force_reload();
+			ipsec_force_reload();
 			break;
 		case 'sshd':
 			send_event("service restart sshd");
@@ -796,15 +800,11 @@ function service_control_restart($name, $extras) {
 			$vpnmode = htmlspecialchars($extras['vpnmode']);
 			if ($vpnmode == "server" || $vpnmode == "client") {
 				$id = htmlspecialchars($extras['id']);
-				$configfile = "{$g['varetc_path']}/openvpn/{$vpnmode}{$id}.conf";
+				$configfile = "{$g['openvpn_base']}/{$vpnmode}{$id}/config.ovpn";
 				if (file_exists($configfile)) {
 					openvpn_restart_by_vpnid($vpnmode, $id);
 				}
 			}
-			break;
-		case 'relayd':
-			relayd_configure(true);
-			filter_configure();
 			break;
 		case 'syslogd':
 			system_syslogd_start();

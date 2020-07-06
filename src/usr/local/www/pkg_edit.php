@@ -3,7 +3,9 @@
  * pkg_edit.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -95,8 +97,9 @@ if ($config['installedpackages'] && !is_array($config['installedpackages'][xml_s
  *  https://redmine.pfsense.org/issues/7624
  *  https://redmine.pfsense.org/issues/476
  */
-if ($config['installedpackages'] &&
-    (count($config['installedpackages'][xml_safe_fieldname($pkg['name'])]['config']) > 0) &&
+
+init_config_arr(array('installedpackages', xml_safe_fieldname($pkg['name']), 'config'));
+if ((count($config['installedpackages'][xml_safe_fieldname($pkg['name'])]['config']) > 0) &&
     (empty($config['installedpackages'][xml_safe_fieldname($pkg['name'])]['config'][0])) &&
     is_array($config['installedpackages'][xml_safe_fieldname($pkg['name'])]['config'])) {
 	array_shift($config['installedpackages'][xml_safe_fieldname($pkg['name'])]['config']);
@@ -324,7 +327,7 @@ function display_row($trc, $value, $fieldname, $type, $rowhelper, $description, 
 				null,
 				'password',
 				$value
-			))->setHelp($description);
+			))->setHelp($description)->setAttribute('autocomplete', 'new-password');
 			break;
 		case "textarea":
 			$group->add(new Form_Textarea(
@@ -587,6 +590,9 @@ if ($pkg['tabs'] != "") {
 
 	ksort($tab_array);
 }
+if (!empty($pkg['tabs'])) {
+	$shortcut_section = $pkg['shortcut_section'];
+}
 
 include("head.inc");
 if ($pkg['custom_php_after_head_command']) {
@@ -794,7 +800,7 @@ foreach ($pkg['fields']['field'] as $pkga) {
 					$pkga['fielddescr'],
 					'password',
 					$value
-				))->setHelp($pkga['description']);
+				))->setHelp($pkga['description'])->setAttribute('autocomplete', 'new-password');
 			} else {
 				if (isset($pkga['advancedfield']) && isset($advfield_count)) {
 					$advanced->addInput(new Form_Input(
@@ -802,14 +808,14 @@ foreach ($pkg['fields']['field'] as $pkga) {
 						$pkga['fielddescr'],
 						'password',
 						$value
-					))->setHelp($pkga['description']);
+					))->setHelp($pkga['description'])->setAttribute('autocomplete', 'new-password');
 				} else {
 					$section->addInput(new Form_Input(
 						$pkga['fieldname'],
 						$pkga['fielddescr'],
 						'password',
 						$value
-					))->setHelp($pkga['description']);
+					))->setHelp($pkga['description'])->setAttribute('autocomplete', 'new-password');
 				}
 			}
 
@@ -1102,10 +1108,7 @@ foreach ($pkg['fields']['field'] as $pkga) {
 			$size = ($pkga['size'] ? "size=\"{$pkga['size']}\"" : '');
 			$fieldname = $pkga['fieldname'];
 
-			if (!is_array($config['aliases'])) {
-				$config['aliases'] = array();
-			}
-			
+			init_config_arr(array('aliases', 'alias'));
 			$a_aliases = &$config['aliases']['alias'];
 			$addrisfirst = 0;
 			$aliasesaddr = "";

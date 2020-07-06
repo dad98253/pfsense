@@ -3,7 +3,9 @@
  * firewall_nat_1to1.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -35,11 +37,16 @@ require_once("functions.inc");
 require_once("filter.inc");
 require_once("shaper.inc");
 
-if (!is_array($config['nat']['onetoone'])) {
-	$config['nat']['onetoone'] = array();
-}
-
+init_config_arr(array('nat', 'onetoone'));
 $a_1to1 = &$config['nat']['onetoone'];
+
+$specialsrcdst = explode(" ", "any pptp pppoe l2tp openvpn");
+$ifdisp = get_configured_interface_with_descr();
+
+foreach ($ifdisp as $kif => $kdescr) {
+	$specialsrcdst[] = "{$kif}";
+	$specialsrcdst[] = "{$kif}ip";
+}
 
 /* update rule order, POST[rule] is an array of ordered IDs */
 if (array_key_exists('order-store', $_POST)) {
@@ -142,10 +149,10 @@ display_top_tabs($tab_array);
 	<div class="panel panel-default">
 		<div class="panel-heading"><h2 class="panel-title"><?=gettext("NAT 1:1 Mappings")?></h2></div>
 		<div id="mainarea" class="table-responsive panel-body">
-			<table class="table table-striped table-hover table-condensed">
+			<table id="ruletable" class="table table-striped table-hover table-condensed">
 				<thead>
 					<tr>
-						<th><!-- checkbox --></th>
+						<th><input type="checkbox" id="selectAll" name="selectAll" /></th>
 						<th><!-- icon --></th>
 						<th><?=gettext("Interface"); ?></th>
 						<th><?=gettext("External IP"); ?></th>
@@ -197,8 +204,11 @@ display_top_tabs($tab_array);
 						<td>
 <?php
 					$source_net = pprint_address($natent['source']);
-					$source_cidr = strstr($source_net, '/');
-					echo $natent['external'] . $source_cidr;
+					if (is_specialnet($natent['external'])) {
+						echo $specialnets[$natent['external']];
+					} else {
+						echo $natent['external'] . strstr($source_net, '/');
+					}
 ?>
 						</td>
 						<td>
@@ -301,6 +311,13 @@ events.push(function() {
 		} else {
 			return undefined;
 		}
+	});
+
+	$('#selectAll').click(function() {
+		var checkedStatus = this.checked;
+		$('#ruletable tbody tr').find('td:first :checkbox').each(function() {
+		$(this).prop('checked', checkedStatus);
+		});
 	});
 });
 //]]>

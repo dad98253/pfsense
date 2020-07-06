@@ -3,7 +3,9 @@
  * status_queues.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -33,16 +35,6 @@ header("Pragma: no-cache"); // HTTP/1.0
 */
 
 require_once("guiconfig.inc");
-class QueueStats {
-	public $queuename;
-	public $queuelength;
-	public $pps;
-	public $bandwidth;
-	public $borrows;
-	public $suspends;
-	public $drops;
-}
-
 include_once("shaper.inc");
 
 $stats = get_queue_stats();
@@ -51,7 +43,7 @@ $pgtitle = array(gettext("Status"), gettext("Queues"));
 $shortcut_section = "trafficshaper";
 include("head.inc");
 
-if (!is_array($config['shaper']['queue']) || count($config['shaper']['queue']) < 1) {
+if (!isset($config['shaper']['queue']) || !is_array($config['shaper']['queue']) || count($config['shaper']['queue']) < 1) {
 	print_info_box(gettext("Traffic shaping is not configured."));
 	include("foot.inc");
 	exit;
@@ -137,8 +129,10 @@ events.push(function() {
 						// add diff values also to parent queues
 						parentname = queueparents[find];
 						parentqueuename = parentname+interfacename;
-						interfacename_stats[interfacename][parentqueuename]['pkts_ps'] += pkts_ps;
-						interfacename_stats[interfacename][parentqueuename]['bytes_ps'] += bytes_ps;
+						if (parentname.indexOf('root_') !== 0) {
+							interfacename_stats[interfacename][parentqueuename]['pkts_ps'] += pkts_ps;
+							interfacename_stats[interfacename][parentqueuename]['bytes_ps'] += bytes_ps;
+						}
 						interfacename_stats[interfacename][parentqueuename]['borrows'] += borrows;
 						interfacename_stats[interfacename][parentqueuename]['suspends'] += suspends;
 						interfacename_stats[interfacename][parentqueuename]['droppedpkts'] += droppedpkts;
@@ -165,7 +159,7 @@ events.push(function() {
 				}
 			}
 		}
-		// use a slowly sliding max scale value but do make sure its always large enough to accomodate the largest value..
+		// use a slowly sliding max scale value but do make sure its always large enough to accommodate the largest value..
 		if (graphstatmax < statmax) {
 			// peek value + 10% keeps a little room for it to increase
 			graphstatmax = statmax * 1.1;
@@ -365,46 +359,5 @@ function processInterfaceQueues($altqstats, $parent_name) {
 			}
 		}
 	};
-}
-
-function statsQueues($xml) {
-	global $statistics;
-
-	$fname = convert_real_interface_to_friendly_interface_name($xml['interface']);
-	$qname = str_replace($xml['interface'], $fname, $xml['name']);
-
-	$current = new QueueStats();
-	$child = new QueueStats();
-	$current->queuename = $qname . $fname;
-	$current->queuelength = $xml['qlength'];
-	$current->pps = $xml['measured'];
-	$current->bandwidth = $xml['measuredspeedint'];
-	$current->borrows = intval($xml['borrows']);
-	$current->suspends = intval($xml['suspends']);
-	$current->drops = intval($xml['droppedpkts']);
-	if (is_array($xml['queue'])) {
-		foreach ($xml['queue'] as $q) {
-			$child = statsQueues($q);
-			$current->pps += $child->pps;
-			$current->bandwidth += $child->bandwidth;
-			$current->borrows += $child->borrows;
-			$current->suspends += $child->suspends;
-			$current->drops += $child->drops;
-		}
-	}
-	unset($child);
-	$statistics[] = $current;
-	return $current;
-}
-function format_bits($bits) {
-	if ($bits >= 1000000000) {
-		return sprintf("%.2f Gbps", $bits/1000000000);
-	} else if ($bits >= 1000000) {
-		return sprintf("%.2f Mbps", $bits/1000000);
-	} else if ($bits >= 1000) {
-		return sprintf("%.2f Kbps", $bits/1000);
-	} else {
-		return sprintf("%d bps", $bits);
-	}
 }
 ?>

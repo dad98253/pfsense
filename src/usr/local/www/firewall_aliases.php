@@ -3,7 +3,9 @@
  * firewall_aliases.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -35,14 +37,7 @@ require_once("functions.inc");
 require_once("filter.inc");
 require_once("shaper.inc");
 
-if (!is_array($config['aliases'])) {
-	$config['aliases'] = array();
-}
-
-if (!is_array($config['aliases']['alias'])) {
-	$config['aliases']['alias'] = array();
-}
-
+init_config_arr(array('aliases', 'alias'));
 $a_aliases = &$config['aliases']['alias'];
 
 $tab = ($_REQUEST['tab'] == "" ? "ip" : preg_replace("/\W/", "", $_REQUEST['tab']));
@@ -89,9 +84,6 @@ if ($_POST['act'] == "del") {
 		find_alias_reference(array('nat', 'outbound', 'rule'), array('target'), $alias_name, $is_alias_referenced, $referenced_by);
 		// Alias in an alias
 		find_alias_reference(array('aliases', 'alias'), array('address'), $alias_name, $is_alias_referenced, $referenced_by);
-		// Load Balancer
-		find_alias_reference(array('load_balancer', 'lbpool'), array('port'), $alias_name, $is_alias_referenced, $referenced_by);
-		find_alias_reference(array('load_balancer', 'virtual_server'), array('port'), $alias_name, $is_alias_referenced, $referenced_by);
 		// Static routes
 		find_alias_reference(array('staticroutes', 'route'), array('network'), $alias_name, $is_alias_referenced, $referenced_by);
 		if ($is_alias_referenced == true) {
@@ -239,12 +231,12 @@ display_top_tabs($tab_array);
 		if (is_array($alias["aliasurl"])) {
 			$aliasurls = implode(", ", array_slice($alias["aliasurl"], 0, 10));
 			echo $aliasurls;
-			if (count($aliasurls) > 10) {
+			if (is_array($aliasurls) && (count($aliasurls) > 10)) {
 				echo "&hellip;<br />";
 			}
 			echo "<br />\n";
 		}
-		$tmpaddr = explode(" ", $alias['address']);
+		$tmpaddr = array_map('idn_to_utf8', explode(" ", $alias['address']));
 		$addresses = implode(", ", array_slice($tmpaddr, 0, 10));
 		echo $addresses;
 		if (count($tmpaddr) > 10) {
@@ -258,6 +250,7 @@ display_top_tabs($tab_array);
 			</td>
 			<td>
 				<a class="fa fa-pencil" title="<?=gettext("Edit alias"); ?>" href="firewall_aliases_edit.php?id=<?=$i?>"></a>
+				<a class="fa fa-clone" title="<?=gettext('Copy alias')?>" href="firewall_aliases_edit.php?dup=<?=$i;?>" ></a>
 				<a class="fa fa-trash"	title="<?=gettext("Delete alias")?>" href="?act=del&amp;tab=<?=$tab?>&amp;id=<?=$i?>" usepost></a>
 			</td>
 		</tr>

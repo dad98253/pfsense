@@ -3,7 +3,9 @@
  * firewall_aliases_edit.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * originally based on m0n0wall (http://m0n0.ch/wall)
@@ -44,25 +46,11 @@ if (isset($_POST['referer'])) {
 // Keywords not allowed in names, see globals.inc for list.
 global $pf_reserved_keywords;
 
-// Add all Load balance names to pf_reserved_keywords
-if (is_array($config['load_balancer']['lbpool'])) {
-	foreach ($config['load_balancer']['lbpool'] as $lbpool) {
-		$pf_reserved_keywords[] = $lbpool['name'];
-	}
-}
-
 $reserved_ifs = get_configured_interface_list(true);
 $pf_reserved_keywords = array_merge($pf_reserved_keywords, $reserved_ifs, $reserved_table_names);
 $max_alias_addresses = 5000;
 
-if (!is_array($config['aliases'])) {
-	$config['aliases'] = array();
-}
-
-if (!is_array($config['aliases']['alias'])) {
-	$config['aliases']['alias'] = array();
-}
-
+init_config_arr(array('aliases', 'alias'));
 $a_aliases = &$config['aliases']['alias'];
 
 // Debugging
@@ -104,9 +92,17 @@ if (isset($_REQUEST['id']) && is_numericint($_REQUEST['id'])) {
 	$id = $_REQUEST['id'];
 }
 
+$dup = false;
+if (isset($_REQUEST['dup']) && is_numericint($_REQUEST['dup'])) {
+	$id = $_REQUEST['dup'];
+	$dup = true;
+}
+
 if (isset($id) && $a_aliases[$id]) {
 	$original_alias_name = $a_aliases[$id]['name'];
-	$pconfig['name'] = $a_aliases[$id]['name'];
+	if (!$dup) {
+		$pconfig['name'] = $a_aliases[$id]['name'];
+	}
 	$pconfig['detail'] = $a_aliases[$id]['detail'];
 	$pconfig['address'] = $a_aliases[$id]['address'];
 	$pconfig['type'] = $a_aliases[$id]['type'];
@@ -125,12 +121,23 @@ if (isset($id) && $a_aliases[$id]) {
 	}
 }
 
+if ($dup) {
+	unset($id);
+}
+
 if ($_POST['save']) {
 	// Remember the original name on an attempt to save
 	$origname = $_POST['origname'];
 } else {
 	// Set the original name on edit (or add, when this will be blank)
 	$origname = $pconfig['name'];
+}
+
+if ($_REQUEST['exportaliases']) {
+	$expdata = array_map('idn_to_utf8', explode(" ", $a_aliases[$id]['address']));
+	$expdata = implode("\n", $expdata);
+	$expdata .= "\n";
+	send_user_download('data', $expdata, "{$_POST['origname']}.txt");
 }
 
 $tab = $_REQUEST['tab'];
@@ -174,7 +181,7 @@ if ($_POST['save']) {
 
 	/* Check for reserved keyword names */
 	foreach ($pf_reserved_keywords as $rk) {
-		if ($rk == $_POST['name']) {
+		if (strcasecmp($rk, $_POST['name']) == 0) {
 			$input_errors[] = sprintf(gettext("Cannot use a reserved keyword as an alias name: %s"), $rk);
 		}
 	}
@@ -205,6 +212,13 @@ if ($_POST['save']) {
 		}
 	}
 
+	/* To prevent infinite loops make sure the alias name does not equal the value. */
+	for($i = 0; isset($_POST['address' . $i]); $i++) {
+			if($_POST['address' . $i] == $_POST['name']){
+				$input_errors[] = gettext("Alias value cannot be the same as the alias name: `" . $_POST['name'] . " and " . $_POST['address' . $i] . "`");
+			}
+	}
+
 	$alias = array();
 	$address = array();
 	$final_address_details = array();
@@ -212,12 +226,12 @@ if ($_POST['save']) {
 	$alias['type'] = $_POST['type'];
 
 	if (preg_match("/urltable/i", $_POST['type'])) {
-		$address = "";
+		$address = array();
 
 		/* item is a url table type */
 		if ($_POST['address0']) {
 			/* fetch down and add in */
-			$_POST['address0'] = trim($_POST['address0']);
+			$_POST['address0'] = trim(idn_to_ascii($_POST['address0']));
 			$address[] = $_POST['address0'];
 			$alias['url'] = $_POST['address0'];
 			$alias['updatefreq'] = $_POST['address_subnet0'] ? $_POST['address_subnet0'] : 7;
@@ -239,12 +253,12 @@ if ($_POST['save']) {
 				$final_address_details[] = sprintf(gettext("Entry added %s"), date('r'));
 			}
 		}
-	} else if ($_POST['type'] == "url" || $_POST['type'] == "url_ports") {
+	} elseif (($_POST['type'] == "url") || ($_POST['type'] == "url_ports")) {
 		$desc_fmt_err_found = false;
 
 		/* item is a url type */
 		for ($x = 0; $x < $max_alias_addresses - 1; $x++) {
-			$_POST['address' . $x] = trim($_POST['address' . $x]);
+			$_POST['address' . $x] = trim(idn_to_ascii($_POST['address' . $x]));
 			if ($_POST['address' . $x]) {
 				/* fetch down and add in */
 				$temp_filename = tempnam("{$g['tmp_path']}/", "alias_import");
@@ -283,11 +297,14 @@ if ($_POST['save']) {
 				}
 
 				if (file_exists("{$temp_filename}/aliases")) {
-					$address = parse_aliases_file("{$temp_filename}/aliases", $_POST['type'], 5000);
-					if ($address == null) {
+					$t_address = parse_aliases_file("{$temp_filename}/aliases", $_POST['type'], 5000);
+					if ($t_address == null) {
 						/* nothing was found */
 						$input_errors[] = sprintf(gettext("A valid URL must be provided. Could not fetch usable data from '%s'."), $_POST['address' . $x]);
+					} else {
+						array_push($address, ...$t_address);
 					}
+					unset($t_address);
 					mwexec("/bin/rm -rf " . escapeshellarg($temp_filename));
 				} else {
 					$input_errors[] = sprintf(gettext("URL '%s' is not valid."), $_POST['address' . $x]);
@@ -326,7 +343,7 @@ if ($_POST['save']) {
 				} else {
 					$detail_text = sprintf(gettext("Entry added %s"), date('r'));
 				}
-				$address_items = explode(" ", trim($_POST["address{$x}"]));
+				$address_items = explode(" ", trim(idn_to_ascii($_POST["address{$x}"])));
 				foreach ($address_items as $address_item) {
 					$iprange_type = is_iprange($address_item);
 					if ($iprange_type == 4) {
@@ -441,14 +458,14 @@ if ($_POST['save']) {
 				if (!is_port_or_range($input_address)) {
 					$input_errors[] = sprintf(gettext("%s is not a valid port or alias."), $input_address);
 				}
-			} else if ($_POST['type'] == "host" || $_POST['type'] == "network") {
+			} else if (($_POST['type'] == "host") || ($_POST['type'] == "network")) {
 				if (is_subnet($input_address) ||
 				    (!is_ipaddr($input_address) && !is_hostname($input_address))) {
 					$input_errors[] = sprintf(gettext('%1$s is not a valid %2$s address, FQDN or alias.'), $input_address, $singular_types[$_POST['type']]);
 				}
 			}
 			$tmpaddress = $input_address;
-			if ($_POST['type'] != "host" && is_ipaddr($input_address) && $input_address_subnet[$idx] <> "") {
+			if (($_POST['type'] != "host") && is_ipaddr($input_address) && ($input_address_subnet[$idx] <> "")) {
 				if (!is_subnet($input_address . "/" . $input_address_subnet[$idx])) {
 					$input_errors[] = sprintf(gettext('%1$s/%2$s is not a valid subnet.'), $input_address, $input_address_subnet[$idx]);
 				} else {
@@ -589,7 +606,7 @@ $help = array(
 // On submit, strings like that are parsed and expanded into the appropriate individual entries and then validated.
 $pattern_str = array(
 	'network'			=> '[a-zA-Z0-9_:.-]+(/[0-9]+)?( [a-zA-Z0-9_:.-]+(/[0-9]+)?)*',	// Alias Name, Host Name, IP Address, FQDN, Network or IP Address Range
-	'host'				=> '[a-zA-Z0-9_:.-]+(/[0-9]+)?( [a-zA-Z0-9_:.-]+(/[0-9]+)?)*',	// Alias Name, Host Name, IP Address, FQDN
+	'host'				=> '[\pL0-9_:.-]+(/[0-9]+)?( [a-zA-Z0-9_:.-]+(/[0-9]+)?)*',	// Alias Name, Host Name, IP Address, FQDN
 	'port'				=> '[a-zA-Z0-9_:]+',	// Alias Name, Port Number, or Port Number Range
 	'url'				=> '.*',				// Alias Name or URL
 	'url_ports'			=> '.*',				// Alias Name or URL
@@ -722,7 +739,7 @@ while ($counter < count($addresses)) {
 	$group->add(new Form_IpAddress(
 		'address' . $counter,
 		'Address',
-		$address,
+		idn_to_utf8($address),
 		'ALIASV4V6'
 	))->addMask('address_subnet' . $counter, $address_subnet)->setWidth(4)->setPattern($pattern_str[$tab]);
 
@@ -742,6 +759,15 @@ while ($counter < count($addresses)) {
 
 	$section->add($group);
 	$counter++;
+}
+
+if ((isset($id) && $a_aliases[$id]) && !preg_match("/url/i", $pconfig['type'])) {
+	$form->addGlobal(new Form_Button(
+		'exportaliases',
+		'Export to file',
+		null,
+		'fa-download'
+	))->addClass('btn-primary');
 }
 
 $form->addGlobal(new Form_Button(

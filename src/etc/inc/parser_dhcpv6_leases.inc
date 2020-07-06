@@ -2,11 +2,13 @@
 /*
  * parser_dhcpv6_leases.inc
  *
- * Copyright (c) 2017-2018 Anders Lind (anders.lind@gmail.com)
+ * Copyright (c) 2017-2019 Anders Lind (anders.lind@gmail.com)
  * All rights reserved.
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2016 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2011 Seth Mos
  * All rights reserved.
  *
@@ -444,7 +446,7 @@ NA;
  * This part handles matching properly placed curly braces and semicolons.
  * If in doubt just do experiments! To achieve matching the curly braces we need
  * to check at all levels however we do just capture it all since matching the
- * individual components needs to be handled separatly at each level by other
+ * individual components needs to be handled separately at each level by other
  * regexes.
  * Same idea as with base_regex above, but not expanded to save space.
  */

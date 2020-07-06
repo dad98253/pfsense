@@ -3,7 +3,7 @@
  * auth_check.inc
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2017-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2017-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,7 +19,7 @@
  * limitations under the License.
  */
 /*
- * Light weight authentication check thats ment as a substitute for guiconfig.inc
+ * Light weight authentication check that is meant as a substitute for guiconfig.inc
  * in cases where frequent automatic requests are made like graphs and widget pages.
  */
 

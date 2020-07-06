@@ -3,7 +3,9 @@
  * traffic_shaper_wizard_multi_all.inc
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -26,7 +28,7 @@ require_once("util.inc");
 function step1_stepbeforeformdisplay() {
 	global $stepid, $savemsg, $pkg;
 
-	$fields =& $pkg['step'][0]['fields']['field'];
+	$fields = &$pkg['step'][0]['fields']['field'];
 
 	$lans = 0;
 	$wans = 0;
@@ -119,7 +121,7 @@ function step2_stepbeforeformdisplay() {
 	}
 	$cfgname = "traffic_shaper_wizard_multi_all.xml";
 
-	$fields =& $pkg['step'][1]['fields']['field'];
+	$fields = &$pkg['step'][1]['fields']['field'];
 
 	/*
 	unset($config['ezshaper']['step2']);
@@ -387,9 +389,8 @@ function step3_stepbeforeformdisplay() {
 	$numberofconnections = intval($config['ezshaper']['step1']['numberofconnections']);
 	$numberoflocalinterfaces = intval($config['ezshaper']['step1']['numberoflocalinterfaces']);
 
-	$fields =& $pkg['step'][1]['fields']['field'];
-
-	$voipfields =& $pkg['step'][2]['fields']['field'];
+	$fields = &$pkg['step'][1]['fields']['field'];
+	$voipfields = &$pkg['step'][2]['fields']['field'];
 
 	$voipfields = array();
 	$enablefields = array();
@@ -1187,7 +1188,7 @@ function apply_all_chosen_items() {
 			if ($sched != "PRIQ") {
 				$voipbw = $config['ezshaper']['step3']["local{$i}download"];
 				$voipbwunit = $config['ezshaper']['step3']["local{$i}downloadspeed"];
-				if ($sched != HFSC) {
+				if ($sched != 'HFSC') {
 					if ($voipbwunit == "%")
 						$factor = $lanbw/100;
 					else

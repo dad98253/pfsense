@@ -3,7 +3,9 @@
  * services_pppoe_edit.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -46,10 +48,7 @@ function vpn_pppoe_get_id() {
 	return $vpnid;
 }
 
-if (!is_array($config['pppoes']['pppoe'])) {
-	$config['pppoes']['pppoe'] = array();
-}
-
+init_config_arr(array('pppoes', 'pppoe'));
 $a_pppoes = &$config['pppoes']['pppoe'];
 
 if (is_numericint($_REQUEST['id'])) {
@@ -143,6 +142,8 @@ if ($_POST['save']) {
 			if ($_POST["username{$x}"]) {
 				if (empty($_POST["password{$x}"])) {
 					$input_errors[] = sprintf(gettext("No password specified for username %s"), $_POST["username{$x}"]);
+				} elseif (preg_match("/^!/", trim($_POST["password{$x}"]))) {
+					$input_errors[] = gettext("User passwords cannot start with '!'.");
 				}
 				if ($_POST["ip{$x}"] != "" && !is_ipaddr($_POST["ip{$x}"])) {
 					$input_errors[] = sprintf(gettext("Incorrect ip address specified for username %s"), $_POST["username{$x}"]);
@@ -496,14 +497,16 @@ if ($usernames != "") {
 			'username' . $counter,
 			null,
 			'text',
-			$user
+			$user,
+			['autocomplete' => 'new-password']
 		))->setHelp($numrows == $counter ? 'Username':null);
 
 		$group->add(new Form_Input(
 			'password' . $counter,
 			null,
 			'password',
-			$passwd
+			$passwd,
+			['autocomplete' => 'new-password']
 		))->setHelp($numrows == $counter ? 'Password':null);
 
 		$group->add(new Form_IpAddress(
@@ -541,7 +544,7 @@ $section->addInput(new Form_StaticText(
 
 // Hidden fields
 if (isset($id)) {
-	$section->addInput(new Form_Input(
+	$form->addGlobal(new Form_Input(
 		'id',
 		null,
 		'hidden',
@@ -550,7 +553,7 @@ if (isset($id)) {
 }
 
 if (isset($pconfig['pppoeid'])) {
-	$section->addInput(new Form_Input(
+	$form->addGlobal(new Form_Input(
 		'pppoeid',
 		null,
 		'hidden',

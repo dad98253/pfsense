@@ -3,7 +3,9 @@
  * log.widget.php
  *
  * part of pfSense (https://www.pfsense.org)
- * Copyright (c) 2004-2018 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2004-2013 BSD Perimeter
+ * Copyright (c) 2013-2016 Electric Sheep Fencing
+ * Copyright (c) 2014-2020 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2007 Scott Dale
  * All rights reserved.
  *
@@ -25,7 +27,7 @@ require_once("pfsense-utils.inc");
 require_once("functions.inc");
 
 /* In an effort to reduce duplicate code, many shared functions have been moved here. */
-require_once("filter_log.inc");
+require_once("syslog.inc");
 
 if ($_REQUEST['widgetkey'] && !$_REQUEST['ajax']) {
 	set_customwidgettitle($user_settings);
